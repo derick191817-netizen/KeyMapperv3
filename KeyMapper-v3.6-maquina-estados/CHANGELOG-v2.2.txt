@@ -1,0 +1,15 @@
+KeyMapper — atualização de interface e estabilidade
+
+Mudanças nesta revisão
+- Tela inicial reorganizada com cabeçalho de destaque, estado do sistema mais legível e cartões com espaçamento consistente.
+- Ação de atualizar status disponível diretamente na barra superior.
+- Atalhos principais para configuração e ativação Shizuku/Wi-Fi.
+- Seções de jogos, permissões e ativação com cantos, espaçamentos e hierarquia visual padronizados.
+- Navegação das configurações alterada para uma faixa horizontal rolável, reduzindo a perda de largura útil em celulares.
+- Tratamento de exceções ao abrir as configurações de sobreposição, iniciar o serviço e iniciar um jogo em display específico, com mensagem em vez de encerramento inesperado.
+- Preservadas as configurações já salvas e os arquivos de build/manifest existentes.
+
+Validação
+- Integridade do ZIP e estrutura dos arquivos verificadas.
+- Compilação Android e testes no aparelho não executados neste ambiente: Gradle/Android SDK não estão configurados.
+- Portanto, esta revisão ainda precisa de build e teste funcional no Android Studio/aparelho antes de ser considerada validada.

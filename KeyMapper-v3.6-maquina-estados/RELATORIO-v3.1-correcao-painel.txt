@@ -1,0 +1,23 @@
+KeyMapper v3.1 — correção do painel in-game
+
+Arquivos alterados:
+- app/src/main/java/com/example/keymapper/overlay/ConfigPanelView.kt
+- app/src/main/java/com/example/keymapper/overlay/OverlayManager.kt
+- app/src/main/java/com/example/keymapper/data/HudButton.kt
+
+Interação/foco:
+- A janela de captura do mouse perde o foco e Pointer Capture é liberado ao abrir o painel ou entrar no editor.
+- O painel é focável, usa FLAG_NOT_TOUCH_MODAL, FLAG_WATCH_OUTSIDE_TOUCH e SOFT_INPUT_ADJUST_RESIZE.
+- Toque fora do painel fecha o painel.
+- A captura é restaurada apenas quando o editor do HUD não está aberto.
+
+UI/UX:
+- Mira organizada nas seções TECLAS, SENSIBILIDADE e POSIÇÃO.
+- Campos numéricos alinhados à direita; controles avançados ficam recolhidos em “Mais opções”.
+- Nomes explícitos: Mouse Esquerdo, Mouse Direito, Botão do Meio e NUM 3.
+
+Restrições:
+- Nenhum arquivo Gradle foi alterado.
+- AndroidManifest.xml permaneceu byte a byte igual ao projeto base v3.0.
+- Valores padrão 16240, 69, 0.9 e 199 preservados.
+- Verificações estáticas e integridade ZIP passaram. Build Gradle e teste real em dispositivo não foram executados neste ambiente.
