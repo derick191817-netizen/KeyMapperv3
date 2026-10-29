@@ -12,7 +12,8 @@ class KeyMapperApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        CrashReporter.install(this)
+        // O relatório de crash é auxiliar: uma falha nele não deve bloquear a Activity.
+        runCatching { CrashReporter.install(this) }
         // Não inicializar bibliotecas de acesso a APIs ocultas durante a abertura do painel.
         // O recurso é preparado sob demanda pelo injetor, para que uma incompatibilidade
         // com o fabricante/Android não impeça a Activity principal de abrir.

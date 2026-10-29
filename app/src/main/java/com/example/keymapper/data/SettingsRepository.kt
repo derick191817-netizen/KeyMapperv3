@@ -6,13 +6,18 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 import java.io.IOException
 
-private val Context.store by preferencesDataStore(name = "keymapper")
+// Recupera automaticamente um arquivo DataStore corrompido em vez de impedir a inicialização.
+private val Context.store by preferencesDataStore(
+    name = "keymapper",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 class SettingsRepository(context: Context) {
     private val ctx = context.applicationContext
@@ -22,7 +27,11 @@ class SettingsRepository(context: Context) {
 
     val flow: Flow<AppSettings> = ctx.store.data.catch { e ->
         if (e is IOException) emit(emptyPreferences()) else throw e
-    }.map { p -> p[key]?.let { AppSettings.fromJson(it) } ?: AppSettings() }
+    }.map { p ->
+        val raw = p[key]
+        if (raw.isNullOrBlank()) AppSettings()
+        else runCatching { AppSettings.fromJson(raw) }.getOrElse { AppSettings() }
+    }
 
     suspend fun save(s: AppSettings) {
         ctx.store.edit { prefs ->

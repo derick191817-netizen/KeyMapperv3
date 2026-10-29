@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (::settingsViewModel.isInitialized) settingsViewModel.close()
+        if (::settingsViewModel.isInitialized) runCatching { settingsViewModel.close() }
         super.onDestroy()
     }
 
