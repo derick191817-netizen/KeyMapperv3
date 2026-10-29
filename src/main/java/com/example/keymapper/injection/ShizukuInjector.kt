@@ -4,6 +4,8 @@ import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Log
 import android.view.InputEvent
+import android.os.Build
+import org.lsposed.hiddenapibypass.HiddenApiBypass
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
@@ -22,6 +24,19 @@ class ShizukuInjector : Injector {
     }
 
     private val inputManager: Any by lazy {
+        // Prepara o acesso restrito somente quando a injeção é realmente solicitada.
+        // Alguns firmwares não permitem esse bypass; falha será contida por inject().
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                HiddenApiBypass.addHiddenApiExemptions(
+                    "Landroid/view/InputEvent;",
+                    "Landroid/hardware/input/IInputManager;",
+                    "Landroid/app/IActivityTaskManager;"
+                )
+            } catch (t: Throwable) {
+                Log.w(TAG, "Bypass de APIs ocultas indisponível neste dispositivo", t)
+            }
+        }
         val binder = ShizukuBinderWrapper(SystemServiceHelper.getSystemService("input"))
         Class.forName("android.hardware.input.IInputManager\$Stub")
             .getMethod("asInterface", IBinder::class.java)

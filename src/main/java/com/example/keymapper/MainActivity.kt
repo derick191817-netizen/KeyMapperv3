@@ -1,12 +1,9 @@
 package com.example.keymapper
 
-import android.Manifest
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -32,12 +29,8 @@ import com.example.keymapper.ui.SettingsScreen
 class MainActivity : ComponentActivity() {
     private lateinit var settingsViewModel: SettingsViewModel
     private val tick = mutableIntStateOf(0)
-    private val notifPerm =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33) notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
         settingsViewModel = SettingsViewModel((application as KeyMapperApp).settingsRepository)
         setContent {
             val s by settingsViewModel.settings.collectAsState()
