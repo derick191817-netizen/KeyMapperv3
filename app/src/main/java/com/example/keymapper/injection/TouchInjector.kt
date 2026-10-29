@@ -8,15 +8,15 @@ import android.util.Log
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.MotionEvent
+import com.example.keymapper.diagnostics.InputDiagnostics
 
 /**
  * Monta eventos multitoque e injeta (via Shizuku). Todos os métodos devem ser chamados na thread de
  * [handler] (prioridade URGENT_DISPLAY).
  *
  * Estabilidade:
- *  - THROTTLING: movimentos relativos respeitam intervalo mínimo de 9 ms, arredondando para cima
- *    8,333 ms para não ultrapassar 120 Hz com uptimeMillis(). Eventos críticos de toque continuam
- *    preservados; o mouse relativo é limitado separadamente.
+ *  - THROTTLING: movimentos relativos são agregados em janelas de 8,333 ms (alvo aproximado de 120 Hz),
+ *    sem descartar a soma dos deltas. Eventos críticos de toque continuam preservados.
  *  - MEMÓRIA: todo MotionEvent.obtain() é seguido de recycle() em try/finally.
  *  - SHIZUKU: a injeção é protegida por try/catch (Throwable). Se falhar [MAX_FAILS] vezes seguidas, o injetor
  *    "quebra" (para de tentar, sem travar nada), avisa por [onFailure] e volta sozinho quando o Shizuku responder.
@@ -25,12 +25,11 @@ import android.view.MotionEvent
  */
 class TouchInjector(
     private val injector: Injector,
-    private val displayId: () -> Int,
-    private val extraDelayMs: Long
+    private val displayId: () -> Int
 ) {
     companion object {
         private const val MIN_MOVE_INTERVAL_NS = 8_333_333L
-        private const val MIN_VIRTUAL_MOVE_INTERVAL_MS = 9L
+        private const val MIN_VIRTUAL_MOVE_INTERVAL_NS = 8_333_333L
         private const val MAX_FAILS = 30
         private const val TAG = "KeyMapperInjector"
     }
@@ -50,7 +49,11 @@ class TouchInjector(
 
     // throttling para contatos touchscreen e para mouse relativo virtual
     private var lastMoveAtNs = 0L
-    private var lastVirtualMoveAtMs = 0L
+    private var lastVirtualMoveAtNs = 0L
+    private var pendingVirtualX = 0f
+    private var pendingVirtualY = 0f
+    private var virtualMoveScheduled = false
+    private val flushVirtualMove = Runnable { flushVirtualMove() }
     private var moveDirty = false
     private val flushMove = Runnable { flushPendingMove() }
 
@@ -65,7 +68,6 @@ class TouchInjector(
     private var readinessKnown = false
     private var cachedReady = false
     private var failureReported = false
-    private var skipSleep = false
     private var displaySetterUnavailableLogged = false
 
     fun isDown(id: Int) = pts.containsKey(id)
@@ -141,35 +143,82 @@ class TouchInjector(
      * pelo limitador de frequência dos movimentos.
      */
     fun swap(oldId: Int, newId: Int, ex: Float, ey: Float, nx: Float, ny: Float) {
-        skipSleep = true
-        try {
-            move(oldId, ex, ey)
-            up(oldId)
-            down(newId, nx, ny)
-        } finally {
-            skipSleep = false
-        }
+        move(oldId, ex, ey)
+        up(oldId)
+        down(newId, nx, ny)
     }
 
     fun releaseAll() {
-        flushPendingMove()
+        // Nunca reproduz movimento acumulado depois de pausa/perda de foco.
+        handler.removeCallbacks(flushVirtualMove)
+        pendingVirtualX = 0f
+        pendingVirtualY = 0f
+        virtualMoveScheduled = false
+        lastVirtualMoveAtNs = 0L
+        flushPendingMove(force = true)
         pts.keys.toList().forEach { up(it) }
     }
 
     /**
-     * Envia um delta de mouse virtual, não coordenadas absolutas de touchscreen.
-     * x/y são deltas relativos (REL_X/REL_Y). Android não garante que valores absolutos fora
-     * da superfície sejam entregues ao jogo; SOURCE_MOUSE_RELATIVE é o caminho correto para
-     * aplicações que realmente leem entrada relativa de mouse. Jogos apenas touch podem ignorá-lo.
-     * Chamado na thread de [handler]. Eventos dentro do intervalo de 9 ms são descartados.
+     * Acumula deltas relativos. O limitador de frequência agrupa movimentos em vez de descartá-los,
+     * preservando a distância total mesmo quando o mouse entrega eventos acima de 120 Hz.
+     * Chamado na thread de [handler].
      */
     fun injectVirtualMove(x: Float, y: Float) {
         if (!x.isFinite() || !y.isFinite() || (x == 0f && y == 0f)) return
-        val now = SystemClock.uptimeMillis()
-        if (now - lastVirtualMoveAtMs < MIN_VIRTUAL_MOVE_INTERVAL_MS) return
-        lastVirtualMoveAtMs = now
-        if (broken && !probe(now)) return
+        val nowMs = SystemClock.uptimeMillis()
+        if (broken && !probe(nowMs)) {
+            pendingVirtualX = 0f
+            pendingVirtualY = 0f
+            virtualMoveScheduled = false
+            handler.removeCallbacks(flushVirtualMove)
+            return
+        }
+        pendingVirtualX += x
+        pendingVirtualY += y
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        val elapsed = nowNs - lastVirtualMoveAtNs
+        if (lastVirtualMoveAtNs == 0L || elapsed >= MIN_VIRTUAL_MOVE_INTERVAL_NS) {
+            flushVirtualMove()
+        } else if (!virtualMoveScheduled) {
+            virtualMoveScheduled = true
+            handler.postDelayed(
+                flushVirtualMove,
+                delayMsFor(MIN_VIRTUAL_MOVE_INTERVAL_NS - elapsed)
+            )
+        }
+    }
 
+    private fun flushVirtualMove() {
+        handler.removeCallbacks(flushVirtualMove)
+        virtualMoveScheduled = false
+        if (pendingVirtualX == 0f && pendingVirtualY == 0f) return
+        val nowMs = SystemClock.uptimeMillis()
+        if (broken && !probe(nowMs)) {
+            pendingVirtualX = 0f
+            pendingVirtualY = 0f
+            return
+        }
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        val elapsed = nowNs - lastVirtualMoveAtNs
+        if (lastVirtualMoveAtNs != 0L && elapsed < MIN_VIRTUAL_MOVE_INTERVAL_NS) {
+            virtualMoveScheduled = true
+            handler.postDelayed(
+                flushVirtualMove,
+                delayMsFor(MIN_VIRTUAL_MOVE_INTERVAL_NS - elapsed)
+            )
+            return
+        }
+        val dx = pendingVirtualX
+        val dy = pendingVirtualY
+        pendingVirtualX = 0f
+        pendingVirtualY = 0f
+        lastVirtualMoveAtNs = nowNs
+        sendVirtualMove(dx, dy, nowMs)
+    }
+
+    private fun sendVirtualMove(x: Float, y: Float, now: Long) {
+        if (x == 0f && y == 0f) return
         val props = arrayOf(
             MotionEvent.PointerProperties().apply {
                 id = 0
@@ -178,7 +227,6 @@ class TouchInjector(
         )
         val coords = arrayOf(
             MotionEvent.PointerCoords().apply {
-                // x/y convencionais permanecem neutros; o movimento está nos eixos RELATIVE.
                 this.x = 0f
                 this.y = 0f
                 setAxisValue(MotionEvent.AXIS_RELATIVE_X, x)
@@ -241,6 +289,7 @@ class TouchInjector(
     /** Injeta e SEMPRE recicla o evento (try/finally); falhas do Shizuku não derrubam nada. */
     private fun deliver(ev: MotionEvent, now: Long) {
         var ok = false
+        val startedNs = SystemClock.elapsedRealtimeNanos()
         try {
             // Verifica conexão/permissão antes da injeção, sem chamar pingBinder em cada evento.
             if (!readinessKnown || now - lastReadyCheck >= 500L) {
@@ -255,6 +304,7 @@ class TouchInjector(
                 broken = true
                 lastProbe = now
                 reportFailureOnce("Shizuku desconectado ou sem permissão; evento descartado")
+                InputDiagnostics.recordInjection(false, SystemClock.elapsedRealtimeNanos() - startedNs)
                 return
             }
             try {
@@ -274,6 +324,7 @@ class TouchInjector(
         } finally {
             ev.recycle()
         }
+        InputDiagnostics.recordInjection(ok, SystemClock.elapsedRealtimeNanos() - startedNs)
         if (ok) {
             failStreak = 0
         } else if (++failStreak >= MAX_FAILS && !broken) {
@@ -281,7 +332,6 @@ class TouchInjector(
             lastProbe = now
             reportFailureOnce("Injeção interrompida após $failStreak falhas consecutivas")
         }
-        if (extraDelayMs > 0 && !skipSleep) SystemClock.sleep(extraDelayMs)
     }
 
     /** A cada 1 s verifica se o Shizuku voltou; se sim, retoma. */

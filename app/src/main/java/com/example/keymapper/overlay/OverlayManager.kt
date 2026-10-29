@@ -10,6 +10,9 @@ import android.view.WindowManager.LayoutParams as WLP
 import com.example.keymapper.display.DisplayHelper
 import com.example.keymapper.display.DisplayUtils
 import com.example.keymapper.input.CaptureView
+import com.example.keymapper.input.InputState
+import com.example.keymapper.input.InputStateMachine
+import com.example.keymapper.diagnostics.InputDiagnostics
 
 /**
  * Janelas SYSTEM_ALERT_WINDOW (TYPE_APPLICATION_OVERLAY) no monitor alvo (celular ou DeX).
@@ -325,10 +328,14 @@ class OverlayManager(
                 PixelFormat.TRANSLUCENT
             )
             lp.gravity = gravity
+            // Não force o teclado a ficar oculto: a janela deve aceitar foco e permitir que
+            // cada EditText solicite o IME ao ser tocado.
             lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
-                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
             manager.addView(p, lp)
             panel = p
+            InputStateMachine.transition(InputState.CONFIGURATION, "painel de configuração aberto", force = true)
+            InputDiagnostics.setMode("CONFIGURATION", "painel de configuração aberto")
             updateCursorVisibility()
             p.post {
                 p.isFocusable = true
@@ -353,6 +360,8 @@ class OverlayManager(
         } catch (e: Exception) {
         }
         panel = null
+        InputStateMachine.transition(InputState.GAME_READY, "painel de configuração fechado", force = true)
+        InputDiagnostics.setMode("GAME_READY", "painel de configuração fechado")
         updateCursorVisibility()
         // Não reativa a captura enquanto o editor de HUD estiver aberto; nesse estado
         // o mouse deve permanecer como ponteiro normal para arrastar/editar os controles.
@@ -392,10 +401,10 @@ class OverlayManager(
 
     /** Remove tudo, uma janela por vez (se uma falhar, as outras ainda saem: sem vazamento). */
     fun hide() {
-        capture?.stop()
-        captureEnabled = false
         closeConfig()
         closeQuickMenu(false)
+        capture?.stop()
+        captureEnabled = false
         val m = wm
         val views = listOf<View?>(hud, capture, bubble, virtualCursor)
         for (v in views) {
@@ -417,5 +426,7 @@ class OverlayManager(
         captureEnabled = false
         wm = null
         wctx = null
+        InputStateMachine.transition(InputState.INACTIVE, "overlays removidos", force = true)
+        InputDiagnostics.setMode("INACTIVE", "overlays removidos")
     }
 }

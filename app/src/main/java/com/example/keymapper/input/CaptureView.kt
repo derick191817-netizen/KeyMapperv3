@@ -5,6 +5,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import com.example.keymapper.diagnostics.InputDiagnostics
 
 /** Captura entrada física enquanto esta view possui foco e Pointer Capture. */
 class CaptureView(
@@ -18,6 +19,7 @@ class CaptureView(
 
     @Volatile private var want = false
     private var lastButtons = 0
+    private var fallbackInitialized = false
     private val heldKeys = LinkedHashSet<Int>()
 
     init {
@@ -34,6 +36,9 @@ class CaptureView(
 
     fun start() {
         want = true
+        fallbackInitialized = false
+        InputStateMachine.transition(InputState.GAME_READY, "CaptureView.start", force = true)
+        InputDiagnostics.setCapture(hasPointerCapture(), hasWindowFocus(), "CaptureView.start")
         isFocusable = true
         isFocusableInTouchMode = true
         post {
@@ -46,12 +51,23 @@ class CaptureView(
 
     fun stop() {
         want = false
+        fallbackInitialized = false
+        InputStateMachine.transition(InputState.POINTER_RELEASED, "CaptureView.stop", force = true)
+        InputDiagnostics.setCapture(false, hasWindowFocus(), "CaptureView.stop")
         if (hasPointerCapture()) releasePointerCapture()
         releaseHeldInputs()
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
+        InputDiagnostics.setCapture(hasPointerCapture(), hasWindowFocus, "windowFocusChanged")
+        if (!hasWindowFocus && want) {
+            InputStateMachine.transition(InputState.SUSPENDED, "janela perdeu foco", force = true)
+        } else if (want && hasPointerCapture()) {
+            InputStateMachine.transition(InputState.POINTER_CAPTURED, "janela focada com captura", force = true)
+        } else if (want) {
+            InputStateMachine.transition(InputState.GAME_READY, "janela focada, aguardando captura", force = true)
+        }
         if (hasWindowFocus && want) {
             post {
                 if (want) {
@@ -68,6 +84,16 @@ class CaptureView(
     override fun onPointerCaptureChange(hasCapture: Boolean) {
         super.onPointerCaptureChange(hasCapture)
         Log.d(TAG, "Pointer Capture ${if (hasCapture) "ativado" else "desativado"}; want=$want, focus=${hasWindowFocus()}")
+        // Evita transformar a primeira coordenada absoluta após uma troca de captura em um delta grande.
+        fallbackX = 0f
+        fallbackY = 0f
+        fallbackInitialized = false
+        InputDiagnostics.setCapture(hasCapture, hasWindowFocus(), "pointerCaptureChange")
+        if (hasCapture && want && hasWindowFocus()) {
+            InputStateMachine.transition(InputState.POINTER_CAPTURED, "Pointer Capture concedido", force = true)
+        } else if (want && hasWindowFocus()) {
+            InputStateMachine.transition(InputState.POINTER_RELEASED, "Pointer Capture liberado", force = true)
+        }
         if (hasCapture && !want) releasePointerCapture()
     }
 
@@ -93,7 +119,10 @@ class CaptureView(
         val changed = state xor lastButtons
         if (changed != 0) {
             val bits = intArrayOf(MotionEvent.BUTTON_PRIMARY, MotionEvent.BUTTON_SECONDARY, MotionEvent.BUTTON_TERTIARY)
-            for (bit in bits) if ((changed and bit) != 0) safeButton(bit, (state and bit) != 0)
+            for (bit in bits) if ((changed and bit) != 0) {
+                InputDiagnostics.recordButton()
+                safeButton(bit, (state and bit) != 0)
+            }
             lastButtons = state
         }
         if (event.actionMasked == MotionEvent.ACTION_MOVE || event.actionMasked == MotionEvent.ACTION_HOVER_MOVE) {
@@ -106,17 +135,19 @@ class CaptureView(
             // Sem Pointer Capture, muitos drivers só fornecem coordenadas de hover; converte-as
             // em deltas para não encaminhar coordenadas absolutas como se fossem movimento relativo.
             if (!captured && dx == 0f && dy == 0f) {
-                dx = event.x - fallbackX
-                dy = event.y - fallbackY
+                if (fallbackInitialized) {
+                    dx = event.x - fallbackX
+                    dy = event.y - fallbackY
+                }
+                fallbackInitialized = true
             }
-            if (captured && dx == 0f && dy == 0f && (event.x != 0f || event.y != 0f)) {
-                dx = event.x
-                dy = event.y
-            }
+            // Com Pointer Capture, event.x/event.y não são um substituto válido para REL_X/REL_Y.
+            // Usá-los aqui causava saltos quando um driver enviava um evento relativo zerado.
             fallbackX = event.x
             fallbackY = event.y
             if (dx.isFinite() && dy.isFinite() && (dx != 0f || dy != 0f)) {
                 Log.d(TAG, "Mouse $dx,$dy")
+                InputDiagnostics.recordMouse(dx, dy)
                 try { onDelta(dx, dy) } catch (t: Throwable) { Log.e(TAG, "Erro encaminhando movimento do mouse", t) }
             }
         }
@@ -140,6 +171,7 @@ class CaptureView(
         if (!want) return super.onKeyDown(keyCode, event)
         if (event.repeatCount == 0 && heldKeys.add(keyCode)) {
             Log.d(TAG, "Tecla $keyCode DOWN")
+            InputDiagnostics.recordKey(true)
             safeKey(keyCode, true)
         }
         return true
@@ -149,6 +181,7 @@ class CaptureView(
         if (!want) return super.onKeyUp(keyCode, event)
         if (heldKeys.remove(keyCode)) {
             Log.d(TAG, "Tecla $keyCode UP")
+            InputDiagnostics.recordKey(false)
             safeKey(keyCode, false)
         }
         return true

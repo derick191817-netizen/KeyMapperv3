@@ -1,6 +1,5 @@
 package com.example.keymapper.service
 
-import android.app.ActivityManager
 import android.app.ActivityOptions
 import android.app.Notification
 import android.app.NotificationChannel
@@ -167,17 +166,9 @@ class MappingService : Service(), HudView.Host {
                 ).show()
             }
         }
-        // Aparelhos com menos de 4 GB de RAM: pequena folga entre eventos para evitar ANR
-        val mi = ActivityManager.MemoryInfo()
-        (getSystemService(ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(mi)
-        val low = mi.totalMem < 4L * 1024 * 1024 * 1024
-        val extra = when (cfg.perfMode) {
-            1 -> 0L            // alta performance: sem folga
-            2 -> 5L            // economia
-            else -> if (low) 5L else 0L
-        }
-
-        val t = TouchInjector(injector, { info.displayId }, extra)
+        // Não introduzimos pausas artificiais no caminho crítico. O injetor agrega apenas os
+        // movimentos que excedem a cadência-alvo, sem bloquear a thread com sleep.
+        val t = TouchInjector(injector, { info.displayId })
         touch = t
         t.onFailure = {
             // Callback vindo da thread de injeção: notificações e liberação sempre na UI thread.

@@ -95,6 +95,7 @@ import com.example.keymapper.data.Mode
 import com.example.keymapper.data.Rot
 import com.example.keymapper.presentation.SettingsViewModel
 import com.example.keymapper.diagnostics.CrashReporter
+import com.example.keymapper.diagnostics.InputDiagnostics
 import com.example.keymapper.data.keyLabel
 import com.example.keymapper.display.DisplayHelper
 import com.example.keymapper.display.DisplayUtils
@@ -985,6 +986,7 @@ private fun SystemTab(
     SwitchRow("Iniciar ao ligar o celular", "Sobe o serviço depois do boot.", d.autoStart) { v -> edit { it.copy(autoStart = v) } }
 
     Section("Diagnóstico")
+    InfoRow("Entrada recente", InputDiagnostics.summary())
     InfoRow("Versão do app", version)
     InfoRow("Aparelho", hw.name)
     InfoRow("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
@@ -1006,6 +1008,8 @@ private fun SystemTab(
             appendLine("Tela: ${hw.res} @ ${hw.dpi} dpi, ${hw.hz} Hz | RAM: ${hw.ramGb} GB | DeX: ${hw.dex}")
             appendLine("Shizuku: ${stateLabel(state)} | Overlay permitido: $overlayOk | Serviço ativo: $running")
             appendLine("App version: $version")
+            appendLine()
+            appendLine(InputDiagnostics.report())
             appendLine()
             appendLine("ÚLTIMO CRASH REGISTRADO")
             appendLine(CrashReporter.lastCrash(ctx))
