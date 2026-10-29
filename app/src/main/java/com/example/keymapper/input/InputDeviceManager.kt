@@ -1,6 +1,3 @@
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
 package com.example.keymapper.input
 
 import android.content.Context
@@ -48,7 +45,7 @@ object InputDeviceManager {
     fun snapshot(): Snapshot = Snapshot(
         InputDevice.getDeviceIds()
             .asSequence()
-            ?.mapNotNull { id -> InputDevice.getDevice(id)?.let(::describe) }
+            .mapNotNull { id -> InputDevice.getDevice(id)?.let(::describe) }
             .sortedWith(compareBy<DeviceInfo> { !it.mouse }.thenBy { !it.keyboard }.thenBy { it.name })
             .toList()
     )
