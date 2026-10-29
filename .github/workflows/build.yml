@@ -1,27 +1,58 @@
-name: Build APK
-on: [push, workflow_dispatch]
+name: Build KeyMapper APK
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v4
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar componentes Android
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0'
+
+      - name: Verificar estrutura Gradle
+        run: |
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -d app/src/main
+
+      - name: Configurar Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Instalar SDK
-        run: yes | sdkmanager "platforms;android-34" "build-tools;34.0.0" || test $? -eq 141
-      - name: Verificar módulos Gradle
-        run: gradle projects
-      - name: Compilar APK
+
+      - name: Mostrar tarefas do módulo app
+        run: gradle :app:tasks --all
+
+      - name: Compilar APK Debug
         run: gradle --no-daemon :app:assembleDebug --stacktrace
-      - name: Guardar APK
+
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: keymapper-debug
+          name: KeyMapper-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
