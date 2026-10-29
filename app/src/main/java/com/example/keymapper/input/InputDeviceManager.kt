@@ -45,7 +45,7 @@ object InputDeviceManager {
     fun snapshot(): Snapshot = Snapshot(
         InputDevice.getDeviceIds()
             .asSequence()
-            .mapNotNull { id -> InputDevice.getDevice(id)?.let(::describe) }
+            ?.mapNotNull { id -> InputDevice.getDevice(id)?.let(::describe) }
             .sortedWith(compareBy<DeviceInfo> { !it.mouse }.thenBy { !it.keyboard }.thenBy { it.name })
             .toList()
     )
