@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -227,8 +228,13 @@ fun SettingsScreen(repo: SettingsRepository, tick: MutableIntState, onBack: () -
             }
         }
     ) { pad ->
-        Row(Modifier.padding(pad).fillMaxSize()) {
-            NavigationRail(modifier = Modifier.fillMaxHeight().verticalScroll(rememberScrollState())) {
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            // Navegação horizontal: mantém os controles legíveis em telas estreitas e no DeX.
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 TABS.forEachIndexed { i, t ->
                     NavigationRailItem(
                         selected = tab == i,
@@ -236,13 +242,14 @@ fun SettingsScreen(repo: SettingsRepository, tick: MutableIntState, onBack: () -
                             tab = i
                             Haptics.tick(view)
                         },
-                        icon = { Icon(t.icon, contentDescription = t.title, modifier = Modifier.size(28.dp)) },
+                        icon = { Icon(t.icon, contentDescription = t.title, modifier = Modifier.size(22.dp)) },
                         label = { Text(t.title, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
                         alwaysShowLabel = true
                     )
                 }
             }
-            Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
+            HorizontalDivider()
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp)) {
                 when (tab) {
                     0 -> PointerTab(d, edit)
                     1 -> AimTab(d, edit)
@@ -806,7 +813,7 @@ private fun AimTab(d: AppSettings, edit: Edit) {
     Text(
         when (d.lookMode) {
             Rot.AUTO -> "Automático: Infinito em Free Fire, PUBG e Call of Duty Mobile; Centro em qualquer outro app."
-            Rot.INFINITE -> "Infinito: o dedo virtual não tem limite de tela. Se a câmera parar ao sair da tela, o jogo ignora toques fora dela: use Centro."
+            Rot.INFINITE -> "Infinito: o cursor virtual continua acumulando o movimento, mas o toque injetado permanece dentro da tela e é reancorado na borda para evitar coordenadas inválidas."
             Rot.OFF -> "Desligado: a câmera para na borda da tela."
             else -> "Centro (padrão, seguro): ao passar da borda, solta e toca no centro na mesma hora, sem pausa."
         },
@@ -816,7 +823,7 @@ private fun AimTab(d: AppSettings, edit: Edit) {
     if (d.lookMode == Rot.INFINITE || d.lookMode == Rot.AUTO) {
         SliderRow(
             "Soltar o dedo da câmera após inatividade (ms)",
-            "Modo infinito: 0 = nunca solta sozinho. Soltar só reancora o ponto de partida; não muda a rotação.",
+            "Cursor virtual: 0 mantém o gesto até soltar a mira ou pausar; valores positivos reancoram após inatividade.",
             d.lookIdleMs.toFloat(), 0f, 3000f, 100f, "%.0f", absMin = 0f, absMax = 60000f
         ) { v -> edit { it.copy(lookIdleMs = v.toInt()) } }
     }

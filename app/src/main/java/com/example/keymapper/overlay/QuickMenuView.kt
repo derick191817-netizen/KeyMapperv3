@@ -84,11 +84,71 @@ class QuickMenuView(
         addRow(tv)
         addRow(sb)
 
+        addRow(TextView(context).apply {
+            text = "Ajustes rápidos"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(8), 0, dp(2))
+        })
+
+        fun addSensitivitySlider(label: String, initial: Float, horizontal: Boolean) {
+            val value = TextView(context).apply {
+                setTextColor(Color.LTGRAY)
+                textSize = 12f
+            }
+            fun updateLabel(v: Float) {
+                value.text = "$label: ${String.format(java.util.Locale.US, "%.2f", v)}x"
+            }
+            updateLabel(initial)
+            val slider = SeekBar(context).apply {
+                max = 500
+                progress = (initial.coerceIn(0f, 5f) * 100).roundToInt()
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(seek: SeekBar, progress: Int, fromUser: Boolean) {
+                        if (!fromUser) return
+                        val v = progress / 100f
+                        updateLabel(v)
+                        val current = host.settings()
+                        host.update(if (horizontal) current.copy(sensX = v) else current.copy(sensY = v))
+                    }
+                    override fun onStartTrackingTouch(seek: SeekBar) {}
+                    override fun onStopTrackingTouch(seek: SeekBar) {
+                        host.persist()
+                        Haptics.tick(this@QuickMenuView)
+                    }
+                })
+            }
+            addRow(value)
+            addRow(slider)
+        }
+
+        val currentSettings = host.settings()
+        addSensitivitySlider("Sensibilidade X", currentSettings.sensX, true)
+        addSensitivitySlider("Sensibilidade Y", currentSettings.sensY, false)
+        addRow(btn("Centralizar sensibilidade (1,00x)") {
+            host.update(host.settings().copy(sensX = 1f, sensY = 1f))
+            host.persist()
+            onClose()
+        })
+
         addRow(btn("Editar HUD") {
             onClose()
             host.setEditing(true)
         })
-        addRow(btn("Abrir configurações do app") {
+        addRow(btn("Configuração BS") {
+            val firstButton = host.settings().buttons.firstOrNull()
+            if (firstButton != null) {
+                // O painel BS está integrado ao editor de um controle. Abrir o modo de edição
+                // primeiro evita que a janela de captura recupere o foco sobre os campos.
+                host.setEditing(true)
+                host.openConfig(firstButton.id)
+            } else {
+                host.openApp()
+            }
+            onClose()
+        })
+        addRow(btn("Ajustes avançados") {
             onClose()
             host.openApp()
         })

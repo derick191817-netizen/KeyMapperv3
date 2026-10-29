@@ -162,7 +162,7 @@ class MappingService : Service(), HudView.Host {
         t.onFailure = {
             // Shizuku caiu: o injetor para de tentar sozinho; soltamos tudo e avisamos (volta sozinho quando o Shizuku voltar)
             ui.post {
-                Toast.makeText(this, "Shizuku desconectado: mapeamento pausado. Reative o Shizuku.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Shizuku indisponível: mapeamento interrompido. Verifique a conexão; a recuperação será tentada automaticamente.", Toast.LENGTH_LONG).show()
                 engine?.releaseAll()
             }
         }

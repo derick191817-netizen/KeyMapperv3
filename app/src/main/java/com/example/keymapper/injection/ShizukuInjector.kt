@@ -2,16 +2,22 @@ package com.example.keymapper.injection
 
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.util.Log
 import android.view.InputEvent
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ShizukuInjector : Injector {
 
+    companion object { private const val TAG = "KeyMapperShizuku" }
+    private val failureLogged = AtomicBoolean(false)
+
     override fun isReady(): Boolean = try {
         Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-    } catch (e: Throwable) {
+    } catch (t: Throwable) {
+        if (failureLogged.compareAndSet(false, true)) Log.w(TAG, "Não foi possível consultar o estado do Shizuku", t)
         false
     }
 
@@ -32,8 +38,12 @@ class ShizukuInjector : Injector {
 
     /** mode 0 = INJECT_INPUT_EVENT_MODE_ASYNC */
     override fun inject(event: InputEvent): Boolean = try {
-        injectMethod.invoke(inputManager, event, 0) as Boolean
-    } catch (e: Throwable) {
+        val result = injectMethod.invoke(inputManager, event, 0) as Boolean
+        if (result) failureLogged.set(false)
+        result
+    } catch (t: Throwable) {
+        // Registra apenas a primeira falha consecutiva; evita inundar o log a cada movimento do mouse.
+        if (failureLogged.compareAndSet(false, true)) Log.w(TAG, "Falha ao injetar entrada via Shizuku", t)
         false
     }
 }

@@ -56,8 +56,8 @@ data class HudButton(
     val macro: List<Int> = emptyList(),   // botão padrão: aciona também estes botões (não toca em si mesmo)
     val name: String = "",
     // ---- mira ----
-    val aimSensX: Float = 1f,         // sensibilidade X com a mira ativa (1.0 = 100 %)
-    val aimSensY: Float = 1f,
+    val aimSensX: Float = 0.9f,       // sensibilidade X com a mira ativa (1.0 = neutro)
+    val aimSensY: Float = 0.9f,
     val aimToggle: Boolean = false,   // suspender: um toque liga a mira, o próximo desliga
     val mouseAim: Boolean = true,     // mouse move a câmera enquanto mira
     val rotMode: Int = -1,            // modo de rotação desta mira (-1 = usar o global; 0..3 = Rot.*)
@@ -65,15 +65,15 @@ data class HudButton(
     val shootKey: Int = -1,           // tecla de tiro associada a esta mira
     val shootSensX: Float = 1f,       // multiplicador extra enquanto a tecla de tiro está pressionada
     val shootSensY: Float = 1f,
-    val aimGeneral: Float = 1f,       // multiplicador geral da mira
-    val aimMouseSens: Float = 1f,     // escala o mouse antes da aceleração
+    val aimGeneral: Float = 16240f,   // fine tuning em escala lógica; 16240 = neutro
+    val aimMouseSens: Float = 69f,    // escala lógica do mouse; 69 = neutro
     val aimAccelLevel: Float = 0f,    // aceleração do mouse, 0..10 (0 = nenhuma)
     val crossSize: Float = 5f,        // cruz de mira, 0..10 (0 = oculta)
     val crossOpacity: Float = 100f,   // 0..100 %
     val aimInvert: Boolean = false,
     val fireWithAim: Boolean = false,
-    val aimPosX: Float = 0.5f,
-    val aimPosY: Float = 0.5f,
+    val aimPosX: Float = 199f,       // escala lógica 0..1000 da área de jogo
+    val aimPosY: Float = 199f,       // escala lógica 0..1000 da área de jogo
     val aimZoom: Float = 1f,
     // ---- tiro ----
     val linkAimId: Int = -1           // tiro: ao pressionar, aciona também esta mira
@@ -95,6 +95,8 @@ data class HudButton(
         put("aimInvert", aimInvert); put("fireWithAim", fireWithAim)
         put("aimPosX", aimPosX.toDouble()); put("aimPosY", aimPosY.toDouble())
         put("aimZoom", aimZoom.toDouble()); put("linkAimId", linkAimId)
+        // Marca a semântica atual para migrar preferências antigas uma única vez.
+        put("aimTuningScale", 2)
     }
 
     companion object {
@@ -138,6 +140,11 @@ data class HudButton(
                     else -> Mode.HOLD
                 }
             }
+            val tuningV2 = b.optInt("aimTuningScale", 0) >= 2
+            val oldMouseSens = b.optDouble("aimMouseSens", 1.0).toFloat()
+            val oldGeneral = b.optDouble("aimGeneral", 1.0).toFloat()
+            val oldPosX = b.optDouble("aimPosX", 0.5).toFloat()
+            val oldPosY = b.optDouble("aimPosY", 0.5).toFloat()
             return HudButton(
                 id = b.getInt("id"),
                 key = key,
@@ -150,8 +157,8 @@ data class HudButton(
                 delayMs = b.optInt("delayMs", 0).coerceIn(0, 500),
                 macro = macro,
                 name = name,
-                aimSensX = b.optDouble("aimSensX", 1.0).toFloat(),
-                aimSensY = b.optDouble("aimSensY", 1.0).toFloat(),
+                aimSensX = b.optDouble("aimSensX", 0.9).toFloat(),
+                aimSensY = b.optDouble("aimSensY", 0.9).toFloat(),
                 aimToggle = b.optBoolean("aimToggle", false),
                 mouseAim = b.optBoolean("mouseAim", true),
                 rotMode = b.optInt("rotMode", -1).coerceIn(-1, 3),
@@ -159,15 +166,15 @@ data class HudButton(
                 shootKey = b.optInt("shootKey", -1),
                 shootSensX = b.optDouble("shootSensX", 1.0).toFloat(),
                 shootSensY = b.optDouble("shootSensY", 1.0).toFloat(),
-                aimGeneral = b.optDouble("aimGeneral", 1.0).toFloat(),
-                aimMouseSens = b.optDouble("aimMouseSens", 1.0).toFloat(),
+                aimGeneral = if (!tuningV2 && oldGeneral <= 5f) oldGeneral * 16240f else oldGeneral,
+                aimMouseSens = if (!tuningV2 && oldMouseSens <= 5f) oldMouseSens * 69f else oldMouseSens,
                 aimAccelLevel = b.optDouble("aimAccelLevel", 0.0).toFloat(),
                 crossSize = b.optDouble("crossSize", 5.0).toFloat(),
                 crossOpacity = b.optDouble("crossOpacity", 100.0).toFloat(),
                 aimInvert = b.optBoolean("aimInvert", false),
                 fireWithAim = b.optBoolean("fireWithAim", false),
-                aimPosX = b.optDouble("aimPosX", 0.5).toFloat(),
-                aimPosY = b.optDouble("aimPosY", 0.5).toFloat(),
+                aimPosX = if (!b.has("aimPosX")) 199f else if (!tuningV2 && oldPosX in 0f..1f) oldPosX * 1000f else oldPosX,
+                aimPosY = if (!b.has("aimPosY")) 199f else if (!tuningV2 && oldPosY in 0f..1f) oldPosY * 1000f else oldPosY,
                 aimZoom = b.optDouble("aimZoom", 1.0).toFloat(),
                 linkAimId = b.optInt("linkAimId", -1)
             )

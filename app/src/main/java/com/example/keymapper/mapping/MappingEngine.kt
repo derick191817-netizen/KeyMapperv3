@@ -24,7 +24,7 @@ import kotlin.math.min
  *  - CÂMERA, 3 modos de rotação (Rot):
  *      CENTRO   : ao passar da borda, o dedo virtual solta (UP) e toca (DOWN) no centro NA MESMA CHAMADA
  *                 (TouchInjector.swap), sem pausa, e continua aplicando os deltas a partir do centro.
- *      INFINITO : coordenadas virtuais sem limite de tela e sem UP; o MOVE sai com o x/y virtual.
+ *      INFINITO : canvas virtual com safe-wrap e injeção de deltas de mouse relativos, sem UP de toque.
  *      DESLIGADO: a mira para na borda.
  *    AUTOMÁTICO escolhe INFINITO em shooters 3D conhecidos e CENTRO nos demais.
  *
@@ -41,7 +41,8 @@ class MappingEngine(
         const val LOOK_A = 1
         const val LOOK_B = 30   // ids 2..29 são dos botões; 30 alterna com 1 ao trocar de dedo
         const val EDGE_MARGIN = 10f
-        const val VIRTUAL_LIMIT = 100_000f // proteção numérica do modo infinito (reancora SEM salto de coordenada)
+        const val VIRTUAL_WRAP_LIMIT = 50_000f
+        const val VIRTUAL_WRAP_SIZE = 100_000f
         val KNOWN_3D = setOf(
             "com.dts.freefireth", "com.dts.freefiremax",
             "com.tencent.ig", "com.pubg.imobile", "com.pubg.krmobile", "com.vng.pubgmobile", "com.rekoo.pubgm",
@@ -53,13 +54,20 @@ class MappingEngine(
     private val keys = HashSet<Int>()
     private val held = HashSet<Int>()      // todas as teclas/botões atualmente pressionados
     private val toggled = HashSet<Int>()
+    // IDs de ponteiro Android são limitados a 0..31. IDs de botão são alocados sem colisão
+    // e liberados junto com o contato; isso evita colisões após criar/apagar muitos controles.
+    private val buttonPointerIds = HashMap<Int, Int>()
     private var joyActive = false
     private var lookActive = false
     private var lookId = LOOK_A
-    private var lx = 0f                    // virtualX
-    private var ly = 0f                    // virtualY
-    private var originX = 0f               // onde o dedo da câmera começou
-    private var originY = 0f
+    // Canvas virtual independente da tela física. Estes valores NUNCA são usados como
+    // coordenadas absolutas de touchscreen: o Android/jogo pode limitar coordenadas fora da
+    // superfície. A injeção contínua usa deltas relativos via TouchInjector.
+    private var virtualX = 5_000f
+    private var virtualY = 5_000f
+    // Posição física válida do contato de câmera.
+    private var lx = 0f
+    private var ly = 0f
 
     @Volatile
     var paused = false
@@ -90,7 +98,13 @@ class MappingEngine(
             }
         }
 
-    private fun pid(b: HudButton) = 2 + (b.id % 28)
+    private fun pointerId(b: HudButton): Int? {
+        buttonPointerIds[b.id]?.let { return it }
+        val used = buttonPointerIds.values.toHashSet()
+        val candidate = (2..29).firstOrNull { it !in used } ?: if (31 !in used) 31 else null
+        if (candidate != null) buttonPointerIds[b.id] = candidate
+        return candidate
+    }
 
     fun onKey(code: Int, down: Boolean) {
         if (paused) return
@@ -153,6 +167,7 @@ class MappingEngine(
             keys.clear()
             held.clear()
             toggled.clear()
+            buttonPointerIds.clear()
             joyActive = false
             lookActive = false
             lookId = LOOK_A
@@ -230,23 +245,27 @@ class MappingEngine(
     }
 
     private fun press(b: HudButton) {
-        val p = pid(b)
+        val p = pointerId(b) ?: return
         if (touch.isDown(p)) return
         val a = area()
         touch.down(p, a.left + b.x * a.width(), a.top + b.y * a.height())
     }
 
     private fun release(b: HudButton) {
-        touch.up(pid(b))
+        val p = buttonPointerIds.remove(b.id) ?: return
+        touch.up(p)
     }
 
     /** Toque curto: desce e solta sozinho. */
     private fun tap(b: HudButton) {
-        val p = pid(b)
+        val p = pointerId(b) ?: return
         if (touch.isDown(p)) return
         val a = area()
         touch.down(p, a.left + b.x * a.width(), a.top + b.y * a.height())
-        touch.handler.postDelayed({ touch.up(p) }, 25)
+        touch.handler.postDelayed({
+            touch.up(p)
+            if (buttonPointerIds[b.id] == p) buttonPointerIds.remove(b.id)
+        }, 25)
     }
 
     /** MIRA: segurar, ou suspender (toggle): um toque ativa e mantém, o próximo desativa. */
@@ -340,13 +359,22 @@ class MappingEngine(
         val dz = if (ab != null) ab.aimDeadzone else s.deadzone
         if (hypot(dx, ady) < dz) return
 
-        val speed = PointerSpeed.mult(s.pointerSpeed) * s.globalSens
+        // Parâmetros globais de compatibilidade BS. Os valores de referência normalizam
+        // a escala para que 69/16240 mantenham fator 1.0; a relação afeta o eixo Y.
+        val bsMouseScale = (s.bsMouseSensitivity / 69f).coerceIn(0f, 2.9f)
+        // Ajuste é uma razão calibrada em torno do padrão 16240 (= 1x), limitada para
+        // impedir que valores fora da escala provoquem saltos de câmera.
+        val bsFineTuneScale = (s.bsFineTune / 16240f).coerceIn(0.25f, 4f)
+        val speed = PointerSpeed.mult(s.pointerSpeed) * s.globalSens * bsMouseScale * bsFineTuneScale
+        val relationY = s.bsSensitivityRatio.coerceIn(0.01f, 10f)
         val ts = 4f / s.lookIntervalMs.coerceIn(1, 20)   // curvas calibradas para 4 ms
         if (ab != null) {
             val shooting = held.contains(ab.shootKey)
-            val mouse = ab.aimMouseSens.coerceAtLeast(0f)
+            // Escalas BS por botão: os padrões 69 e 16240 representam 1x.
+            // Valores são normalizados uma única vez antes de entrar no motor.
+            val mouse = (ab.aimMouseSens / 69f).coerceIn(0f, 2.9f)
             val zoom = ab.aimZoom.coerceAtLeast(1f)
-            val general = ab.aimGeneral * speed / zoom
+            val general = (ab.aimGeneral / 16240f).coerceIn(0.0001f, 4f) * speed / zoom
             val sx = ab.aimSensX * (if (shooting) ab.shootSensX else 1f) * general
             val sy = ab.aimSensY * (if (shooting) ab.shootSensY else 1f) * general
             val level = ab.aimAccelLevel.coerceIn(0f, 10f)
@@ -354,15 +382,17 @@ class MappingEngine(
             sens.process(dx * mouse, ady * mouse, sx, sy, curve, 1f + level * 0.1f, s.knee, s.gain, ts)
         } else {
             val curve = if (s.epp && s.curve == 0) 4 else s.curve
-            sens.process(dx, ady, s.sensX * speed, s.sensY * speed, curve, s.exponent, s.knee, s.gain, ts)
+            sens.process(dx, ady, s.sensX * speed, s.sensY * speed * relationY, curve, s.exponent, s.knee, s.gain, ts)
         }
         val ox = sens.outX
         val oy = sens.outY
         if (ox == 0 && oy == 0) return
 
-        if (s.relativeMouse) {
-            // EXPERIMENTAL (jogos com suporte nativo a mouse): movimento relativo REL_X/REL_Y
-            touch.relative(ox.toFloat(), oy.toFloat())
+        val effectiveLookMode = resolveLookMode(s, ab)
+        if (s.relativeMouse || effectiveLookMode == Rot.INFINITE) {
+            // Movimento contínuo real: envia deltas relativos, nunca posições absolutas fora
+            // da tela. Só funciona em jogos/ambientes que aceitam SOURCE_MOUSE_RELATIVE.
+            injectInfiniteDelta(ox.toFloat(), oy.toFloat())
             return
         }
 
@@ -372,24 +402,41 @@ class MappingEngine(
         val minY = a.top + EDGE_MARGIN
         val maxY = a.bottom - EDGE_MARGIN
         // origem do arrasto = posição da mira (ou área OLHAR); fica sempre dentro dos limites reais da tela
-        val fx = if (ab != null) ab.aimPosX else s.lookX
-        val fy = if (ab != null) ab.aimPosY else s.lookY
-        val cx = (a.left + fx * a.width()).coerceIn(minX, maxX)
+        val fx = if (ab != null) (ab.aimPosX / 1000f).coerceIn(0f, 1f) else s.lookX
+        val fy = if (ab != null) (ab.aimPosY / 1000f).coerceIn(0f, 1f) else s.lookY
+        // Para a mira global, a posição X usa escala lógica 0..1000, mapeada para a largura da área.
+        // Valores salvos no formato anterior (0..100) são migrados no AppSettings.fromJson().
+        val cx = if (ab != null) {
+            (a.left + fx * a.width()).coerceIn(minX, maxX)
+        } else {
+            (a.left + (s.bsLookPositionX.coerceIn(0, 1000) / 1000f) * a.width()).coerceIn(minX, maxX)
+        }
         val cy = (a.top + fy * a.height()).coerceIn(minY, maxY)
 
-        when (resolveLookMode(s, ab)) {
-            Rot.INFINITE -> lookInfinite(s, cx, cy, ox, oy)
+        when (effectiveLookMode) {
             Rot.OFF -> lookClamped(s, cx, cy, ox, oy, minX, maxX, minY, maxY)
             else -> lookCenter(s, cx, cy, ox, oy, minX, maxX, minY, maxY)
         }
     }
 
+    /** Acumula um canvas virtual com safe-wrap e envia apenas o delta relativo do frame. */
+    private fun injectInfiniteDelta(dx: Float, dy: Float) {
+        if (!dx.isFinite() || !dy.isFinite()) return
+        virtualX += dx
+        virtualY += dy
+        if (virtualX > VIRTUAL_WRAP_LIMIT) virtualX -= VIRTUAL_WRAP_SIZE
+        else if (virtualX < -VIRTUAL_WRAP_LIMIT) virtualX += VIRTUAL_WRAP_SIZE
+        if (virtualY > VIRTUAL_WRAP_LIMIT) virtualY -= VIRTUAL_WRAP_SIZE
+        else if (virtualY < -VIRTUAL_WRAP_LIMIT) virtualY += VIRTUAL_WRAP_SIZE
+        touch.injectVirtualMove(dx, dy)
+    }
+
     private fun beginLook(cx: Float, cy: Float) {
         if (!lookActive) {
-            originX = cx
-            originY = cy
             lx = cx
             ly = cy
+            virtualX = cx
+            virtualY = cy
             touch.down(lookId, lx, ly)
             lookActive = true
         }
@@ -404,7 +451,7 @@ class MappingEngine(
         maxOf(s.releaseDelayMs.toLong(), s.lookIntervalMs.coerceIn(1, 20) * 3L + 4L)
 
     /**
-     * MODO CENTRO (fallback seguro): virtualX/virtualY somam os deltas. Ao ultrapassar os limites reais da
+     * MODO CENTRO (fallback seguro): a posição física lx/ly soma os deltas. Ao ultrapassar os limites reais da
      * tela: MOVE até a borda, UP na borda e DOWN no centro, tudo na mesma chamada (TouchInjector.swap),
      * e segue aplicando os deltas a partir do centro (o que passou do limite é levado junto).
      */
@@ -428,28 +475,6 @@ class MappingEngine(
         armRelease(idleMs(s))
     }
 
-    /**
-     * MODO INFINITO (mouse virtual): sem limite de tela e sem ACTION_UP enquanto o mouse se move. O MOVE sai com
-     * as coordenadas virtuais (ex.: x = 50000). Proteção numérica: passando de ±100.000 px o dedo é reancorado
-     * na origem (UP + DOWN sem pausa), sem saltar a coordenada (um salto de -40.000 viraria uma rotação gigante).
-     */
-    private fun lookInfinite(s: AppSettings, cx: Float, cy: Float, ox: Int, oy: Int) {
-        beginLook(cx, cy)
-        lx += ox
-        ly += oy
-        if (abs(lx - originX) > VIRTUAL_LIMIT || abs(ly - originY) > VIRTUAL_LIMIT) {
-            val next = if (lookId == LOOK_A) LOOK_B else LOOK_A
-            touch.swap(lookId, next, lx, ly, originX, originY)
-            lookId = next
-            lx = originX
-            ly = originY
-        } else {
-            touch.move(lookId, lx, ly) // coordenadas virtuais, SEM clamp
-        }
-        // soltar só depois de inatividade (reancora o ponto de partida; não altera a câmera). 0 = nunca.
-        armRelease(s.lookIdleMs.toLong())
-    }
-
     /** MODO DESLIGADO: a mira para na borda da tela (sem trocar de dedo). */
     private fun lookClamped(
         s: AppSettings, cx: Float, cy: Float, ox: Int, oy: Int,
@@ -467,7 +492,9 @@ class MappingEngine(
             touch.up(lookId)
             lookActive = false
             lookId = LOOK_A
-            sens.reset()
         }
+        virtualX = 5_000f
+        virtualY = 5_000f
+        sens.reset()
     }
 }

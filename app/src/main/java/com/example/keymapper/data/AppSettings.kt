@@ -13,6 +13,11 @@ data class AppSettings(
     val sensX: Float = 1f,
     val sensY: Float = 1f,
     val globalSens: Float = 1f,        // multiplica todos os botões
+    // --- parâmetros de compatibilidade "Configuração BS" ---
+    val bsMouseSensitivity: Int = 69,
+    val bsSensitivityRatio: Float = 0.9f,
+    val bsFineTune: Int = 16240,
+    val bsLookPositionX: Int = 199,         // posição horizontal lógica (0..1000) mapeada para 0..100% da área do jogo
     val curve: Int = 0,                // 0 linear, 1 exponencial, 2 customizada, 3 desacelerar
     val exponent: Float = 1.5f,
     val knee: Float = 8f,
@@ -49,7 +54,7 @@ data class AppSettings(
     val theme: Int = 0,
     val autoStart: Boolean = false,
     val editKey: Int = KeyEvent.KEYCODE_F1,
-    val pauseKey: Int = KeyEvent.KEYCODE_F2,
+    val pauseKey: Int = KeyEvent.KEYCODE_NUMPAD_3,
     // --- diagnóstico / câmera ---
     val useExternalDisplay: Boolean = false, // usar o monitor externo (DeX); padrão: tela do aparelho
     val hudWindow: Boolean = true,        // diagnóstico: janela do HUD (tela cheia, transparente)
@@ -68,6 +73,10 @@ data class AppSettings(
         put("pointerSpeed", pointerSpeed); put("epp", epp)
         put("sensX", sensX.toDouble()); put("sensY", sensY.toDouble())
         put("globalSens", globalSens.toDouble())
+        put("bsMouseSensitivity", bsMouseSensitivity)
+        put("bsSensitivityRatio", bsSensitivityRatio.toDouble())
+        put("bsFineTune", bsFineTune)
+        put("bsLookPositionX", bsLookPositionX)
         put("curve", curve); put("exponent", exponent.toDouble())
         put("knee", knee.toDouble()); put("gain", gain.toDouble())
         put("invertY", invertY); put("deadzone", deadzone.toDouble())
@@ -101,6 +110,19 @@ data class AppSettings(
                 epp = o.optBoolean("epp", false),
                 sensX = f("sensX", d.sensX), sensY = f("sensY", d.sensY),
                 globalSens = f("globalSens", d.globalSens),
+                bsMouseSensitivity = o.optInt("bsMouseSensitivity", d.bsMouseSensitivity).coerceIn(0, 200),
+                bsSensitivityRatio = f("bsSensitivityRatio", d.bsSensitivityRatio).coerceIn(0.01f, 10f),
+                bsFineTune = o.optInt("bsFineTune", d.bsFineTune).coerceIn(1, 1_000_000),
+                // Migra o formato anterior (0..100 = porcentagem) para a escala lógica 0..1000.
+                // O padrão novo 199 é preservado; não representa pixels físicos.
+                bsLookPositionX = o.optInt("bsLookPositionX", d.bsLookPositionX).let { value ->
+                    when {
+                        !o.has("bsLookPositionX") -> d.bsLookPositionX
+                        value in 0..100 -> value * 10
+                        value in 0..1000 -> value
+                        else -> d.bsLookPositionX
+                    }
+                },
                 curve = o.optInt("curve", d.curve), exponent = f("exponent", d.exponent),
                 knee = f("knee", d.knee), gain = f("gain", d.gain),
                 invertY = o.optBoolean("invertY", false), deadzone = f("deadzone", d.deadzone),

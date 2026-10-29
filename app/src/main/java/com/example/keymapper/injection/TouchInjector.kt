@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
 import android.os.SystemClock
+import android.util.Log
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.MotionEvent
@@ -13,8 +14,9 @@ import android.view.MotionEvent
  * [handler] (prioridade URGENT_DISPLAY).
  *
  * Estabilidade:
- *  - THROTTLING: ACTION_MOVE sai no máximo a cada [MIN_MOVE_INTERVAL_MS] (8 ms = 120 Hz). Como as posições são
- *    absolutas, um MOVE adiado não perde movimento: o último é reenviado em seguida e SEMPRE antes de um UP/DOWN.
+ *  - THROTTLING: movimentos relativos respeitam intervalo mínimo de 9 ms, arredondando para cima
+ *    8,333 ms para não ultrapassar 120 Hz com uptimeMillis(). Eventos críticos de toque continuam
+ *    preservados; o mouse relativo é limitado separadamente.
  *  - MEMÓRIA: todo MotionEvent.obtain() é seguido de recycle() em try/finally.
  *  - SHIZUKU: a injeção é protegida por try/catch (Throwable). Se falhar [MAX_FAILS] vezes seguidas, o injetor
  *    "quebra" (para de tentar, sem travar nada), avisa por [onFailure] e volta sozinho quando o Shizuku responder.
@@ -27,8 +29,10 @@ class TouchInjector(
     private val extraDelayMs: Long
 ) {
     companion object {
-        const val MIN_MOVE_INTERVAL_MS = 8L
+        private const val MIN_MOVE_INTERVAL_NS = 8_333_333L
+        private const val MIN_VIRTUAL_MOVE_INTERVAL_MS = 9L
         private const val MAX_FAILS = 30
+        private const val TAG = "KeyMapperInjector"
     }
 
     private val thread = HandlerThread("mapper-inject", Process.THREAD_PRIORITY_URGENT_DISPLAY)
@@ -44,8 +48,9 @@ class TouchInjector(
         null
     }
 
-    // throttling
-    private var lastMoveAt = 0L
+    // throttling para contatos touchscreen e para mouse relativo virtual
+    private var lastMoveAtNs = 0L
+    private var lastVirtualMoveAtMs = 0L
     private var moveDirty = false
     private val flushMove = Runnable { flushPendingMove() }
 
@@ -57,6 +62,7 @@ class TouchInjector(
     private var failStreak = 0
     private var lastProbe = 0L
     private var skipSleep = false
+    private var displaySetterUnavailableLogged = false
 
     fun isDown(id: Int) = pts.containsKey(id)
 
@@ -64,7 +70,7 @@ class TouchInjector(
 
     fun down(id: Int, x: Float, y: Float) {
         if (pts.containsKey(id)) return
-        flushPendingMove()
+        flushPendingMove(force = true)
         val now = SystemClock.uptimeMillis()
         val first = pts.isEmpty()
         if (first) downTime = now
@@ -80,32 +86,43 @@ class TouchInjector(
         val p = pts[id] ?: return
         p[0] = sane(x)
         p[1] = sane(y)
-        val now = SystemClock.uptimeMillis()
-        val since = now - lastMoveAt
-        if (since >= MIN_MOVE_INTERVAL_MS) {
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        val sinceNs = nowNs - lastMoveAtNs
+        if (sinceNs >= MIN_MOVE_INTERVAL_NS) {
             moveDirty = false
             handler.removeCallbacks(flushMove)
-            lastMoveAt = now
-            send(MotionEvent.ACTION_MOVE, now)
+            lastMoveAtNs = nowNs
+            send(MotionEvent.ACTION_MOVE, SystemClock.uptimeMillis())
         } else if (!moveDirty) {
             moveDirty = true
-            handler.postDelayed(flushMove, MIN_MOVE_INTERVAL_MS - since) // envia a última posição logo depois
+            handler.postDelayed(flushMove, delayMsFor(MIN_MOVE_INTERVAL_NS - sinceNs))
         }
     }
 
-    private fun flushPendingMove() {
+    private fun delayMsFor(remainingNs: Long): Long =
+        ((remainingNs + 999_999L) / 1_000_000L).coerceAtLeast(1L)
+
+    private fun flushPendingMove(force: Boolean = false) {
         if (!moveDirty) return
-        moveDirty = false
         handler.removeCallbacks(flushMove)
-        if (pts.isEmpty()) return
-        val now = SystemClock.uptimeMillis()
-        lastMoveAt = now
-        send(MotionEvent.ACTION_MOVE, now)
+        if (pts.isEmpty()) {
+            moveDirty = false
+            return
+        }
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        val remaining = MIN_MOVE_INTERVAL_NS - (nowNs - lastMoveAtNs)
+        if (!force && lastMoveAtNs != 0L && remaining > 0L) {
+            handler.postDelayed(flushMove, delayMsFor(remaining))
+            return
+        }
+        moveDirty = false
+        lastMoveAtNs = nowNs
+        send(MotionEvent.ACTION_MOVE, SystemClock.uptimeMillis())
     }
 
     fun up(id: Int) {
         if (!pts.containsKey(id)) return
-        flushPendingMove() // a posição final sempre chega antes do UP
+        flushPendingMove(force = true) // a posição final sempre chega antes do UP
         val now = SystemClock.uptimeMillis()
         val idx = pts.keys.indexOf(id)
         val action = if (pts.size == 1) MotionEvent.ACTION_UP
@@ -116,8 +133,8 @@ class TouchInjector(
 
     /**
      * Troca de dedo SEM intervalo: leva o dedo antigo até (ex, ey), solta (ACTION_UP) e já toca (ACTION_DOWN)
-     * o novo em (nx, ny), tudo em sequência na mesma chamada (bem abaixo de 8 ms; sem a folga de 5 ms
-     * de aparelhos fracos entre eles).
+     * o novo em (nx, ny), em sequência na mesma thread. Eventos UP/DOWN são críticos e não são descartados
+     * pelo limitador de frequência dos movimentos.
      */
     fun swap(oldId: Int, newId: Int, ex: Float, ey: Float, nx: Float, ny: Float) {
         skipSleep = true
@@ -136,12 +153,19 @@ class TouchInjector(
     }
 
     /**
-     * EXPERIMENTAL: injeta um movimento de mouse RELATIVO (AXIS_RELATIVE_X/Y, SOURCE_MOUSE_RELATIVE).
-     * Só tem efeito em jogos que leem mouse; jogos controlados por toque ignoram esse evento.
+     * Envia um delta de mouse virtual, não coordenadas absolutas de touchscreen.
+     * x/y são deltas relativos (REL_X/REL_Y). Android não garante que valores absolutos fora
+     * da superfície sejam entregues ao jogo; SOURCE_MOUSE_RELATIVE é o caminho correto para
+     * aplicações que realmente leem entrada relativa de mouse. Jogos apenas touch podem ignorá-lo.
+     * Chamado na thread de [handler]. Eventos dentro do intervalo de 9 ms são descartados.
      */
-    fun relative(dx: Float, dy: Float) {
-        if (broken && !probe(SystemClock.uptimeMillis())) return
+    fun injectVirtualMove(x: Float, y: Float) {
+        if (!x.isFinite() || !y.isFinite() || (x == 0f && y == 0f)) return
         val now = SystemClock.uptimeMillis()
+        if (now - lastVirtualMoveAtMs < MIN_VIRTUAL_MOVE_INTERVAL_MS) return
+        lastVirtualMoveAtMs = now
+        if (broken && !probe(now)) return
+
         val props = arrayOf(
             MotionEvent.PointerProperties().apply {
                 id = 0
@@ -150,10 +174,11 @@ class TouchInjector(
         )
         val coords = arrayOf(
             MotionEvent.PointerCoords().apply {
-                x = dx
-                y = dy
-                setAxisValue(MotionEvent.AXIS_RELATIVE_X, dx)
-                setAxisValue(MotionEvent.AXIS_RELATIVE_Y, dy)
+                // x/y convencionais permanecem neutros; o movimento está nos eixos RELATIVE.
+                this.x = 0f
+                this.y = 0f
+                setAxisValue(MotionEvent.AXIS_RELATIVE_X, x)
+                setAxisValue(MotionEvent.AXIS_RELATIVE_Y, y)
             }
         )
         val ev = MotionEvent.obtain(
@@ -162,6 +187,9 @@ class TouchInjector(
         )
         deliver(ev, now)
     }
+
+    /** Compatibilidade com chamadas antigas. */
+    fun relative(dx: Float, dy: Float) = injectVirtualMove(dx, dy)
 
     fun shutdown() {
         handler.post {
@@ -201,11 +229,17 @@ class TouchInjector(
         try {
             try {
                 setDisplay?.invoke(ev, displayId())
-            } catch (e: Throwable) {
+            } catch (t: Throwable) {
+                // Alguns builds Android não expõem setDisplayId; mantém o display padrão como fallback.
+                if (!displaySetterUnavailableLogged) {
+                    displaySetterUnavailableLogged = true
+                    Log.d(TAG, "setDisplayId indisponível; usando display padrão", t)
+                }
             }
             ok = injector.inject(ev)
         } catch (t: Throwable) {
             ok = false
+            Log.w(TAG, "Falha ao injetar evento de entrada", t)
         } finally {
             ev.recycle()
         }
@@ -214,7 +248,12 @@ class TouchInjector(
         } else if (++failStreak >= MAX_FAILS && !broken) {
             broken = true            // para o loop suavemente: deixa de tentar até o Shizuku voltar
             lastProbe = now
-            onFailure?.invoke()
+            Log.e(TAG, "Injeção interrompida após $failStreak falhas consecutivas")
+            try {
+                onFailure?.invoke()
+            } catch (t: Throwable) {
+                Log.e(TAG, "Callback de falha do injetor também falhou", t)
+            }
         }
         if (extraDelayMs > 0 && !skipSleep) SystemClock.sleep(extraDelayMs)
     }
@@ -231,6 +270,7 @@ class TouchInjector(
             if (ready) {
                 broken = false
                 failStreak = 0
+                Log.i(TAG, "Shizuku disponível novamente; injeção reativada")
             }
         }
         return !broken

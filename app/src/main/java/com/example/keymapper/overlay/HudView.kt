@@ -7,6 +7,7 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.MotionEvent
+import android.view.KeyEvent
 import android.view.View
 import com.example.keymapper.data.AppSettings
 import com.example.keymapper.data.HudButton
@@ -148,15 +149,20 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             }
         }
 
-        drawToolbar(c)
-        if (editing) drawPanel(c, width.toFloat(), height.toFloat())
+        // A barra e a biblioteca são exclusivas do modo de edição; não devem ficar desenhadas
+        // por cima do jogo durante a partida normal.
+        if (editing) {
+            drawToolbar(c)
+            drawButtonTray(c)
+            drawPanel(c, width.toFloat(), height.toFloat())
+        }
     }
 
     private fun drawCrosshair(c: Canvas, s: AppSettings, id: Int) {
         val b = s.buttons.firstOrNull { it.id == id && it.kind == Kind.AIM } ?: return
         if (b.crossSize <= 0f || b.crossOpacity <= 0f) return
-        val cx = px(b.aimPosX)
-        val cy = py(b.aimPosY)
+        val cx = px((b.aimPosX / 1000f).coerceIn(0f, 1f))
+        val cy = py((b.aimPosY / 1000f).coerceIn(0f, 1f))
         val len = (4f + b.crossSize * 3f) * dp
         val gap = len * 0.35f
         val alpha = (255 * (b.crossOpacity / 100f)).toInt().coerceIn(0, 255)
@@ -273,6 +279,44 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         }
     }
 
+    /** Biblioteca lateral: toque cria um controle no centro da área do jogo. */
+    private fun drawButtonTray(c: Canvas) {
+        val x = width - 58f * dp
+        val startY = (height * 0.5f - 104f * dp).coerceAtLeast(100f * dp)
+        val items = listOf(
+            Triple("TAP", Color.rgb(45, 105, 165), { addControl(Kind.STANDARD, KeyEvent.KEYCODE_SPACE) }),
+            Triple("FIRE", Color.rgb(165, 55, 55), { addControl(Kind.FIRE, -1) }),
+            Triple("AIM", Color.rgb(30, 135, 100), { addControl(Kind.AIM, -2) }),
+            Triple("WASD", Color.rgb(95, 80, 160), { centerJoystick() })
+        )
+        val w = 48f * dp
+        val h = 42f * dp
+        val gap = 9f * dp
+        items.forEachIndexed { index, item ->
+            val top = startY + index * (h + gap)
+            val rect = RectF(x - w, top, x, top + h)
+            paint.style = Paint.Style.FILL
+            paint.color = Color.argb(235, 17, 23, 33)
+            c.drawRoundRect(rect, 9f * dp, 9f * dp, paint)
+            paint.color = item.second
+            c.drawRoundRect(RectF(rect.left, rect.top, rect.left + 4f * dp, rect.bottom), 3f * dp, 3f * dp, paint)
+            text(c, item.first, rect.centerX() + 1f * dp, rect.centerY(), 10f * dp, Color.WHITE)
+            hits.add(rect to item.third)
+        }
+    }
+
+    private fun centerJoystick() {
+        mutate { it.copy(joyX = 0.5f, joyY = 0.5f) }
+        selected = JOY
+        host.persist()
+        Haptics.tick(this)
+    }
+
+    private fun addControl(kind: Int, key: Int) {
+        armedKind = kind
+        addButton(key)
+    }
+
     private fun drawPanel(c: Canvas, w: Float, h: Float) {
         if (selected == NONE) return
         val items = ArrayList<Pair<String, () -> Unit>>()
@@ -308,14 +352,20 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
     }
 
     fun addButton(key: Int) {
+        val kind = armedKind
         val id = (host.settings().buttons.maxOfOrNull { it.id } ?: -1) + 1
-        mutate { it.copy(buttons = it.buttons + HudButton(id, key, 0.5f, 0.5f, kind = armedKind)) }
+        val name = when (kind) {
+            Kind.FIRE -> "Tiro"
+            Kind.AIM -> "Mira"
+            else -> "Padrão"
+        }
+        mutate { it.copy(buttons = it.buttons + HudButton(id, key, 0.5f, 0.5f, kind = kind, name = name)) }
         selected = id
         armed = false
         armedKind = Kind.STANDARD
         host.persist()
         Haptics.tick(this)
-        host.openConfig(id) // já abre as configurações do tipo escolhido
+        host.openConfig(id)
     }
 
     private fun sizeDelta(d: Float) {
@@ -380,7 +430,8 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 updateArea()
-                val hit = hits.firstOrNull { it.first.contains(x, y) }
+                // Os últimos itens desenhados ficam visualmente por cima; a hit-test deve seguir a mesma ordem.
+                val hit = hits.asReversed().firstOrNull { it.first.contains(x, y) }
                 if (hit != null) {
                     hit.second.invoke()
                     invalidate()

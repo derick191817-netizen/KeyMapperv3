@@ -10,6 +10,8 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +56,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -101,9 +105,13 @@ fun HomeScreen(repo: SettingsRepository, tick: Int, onOpenSettings: (Int) -> Uni
     }
 
     fun openOverlaySettings() {
-        ctx.startActivity(
-            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
-        )
+        try {
+            ctx.startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+            )
+        } catch (_: Exception) {
+            Toast.makeText(ctx, "Abra Configurações do Android e permita 'Exibir sobre outros apps'.", Toast.LENGTH_LONG).show()
+        }
     }
 
     fun ensureService(): Boolean {
@@ -118,7 +126,14 @@ fun HomeScreen(repo: SettingsRepository, tick: Int, onOpenSettings: (Int) -> Uni
                 Toast.LENGTH_LONG
             ).show()
         }
-        if (!running) ContextCompat.startForegroundService(ctx, Intent(ctx, MappingService::class.java))
+        if (!running) {
+            try {
+                ContextCompat.startForegroundService(ctx, Intent(ctx, MappingService::class.java))
+            } catch (e: Exception) {
+                Toast.makeText(ctx, "Não foi possível iniciar o serviço: ${e.localizedMessage ?: "erro desconhecido"}", Toast.LENGTH_LONG).show()
+                return false
+            }
+        }
         return true
     }
 
@@ -127,34 +142,129 @@ fun HomeScreen(repo: SettingsRepository, tick: Int, onOpenSettings: (Int) -> Uni
         if (!ensureService()) return
         val i = ctx.packageManager.getLaunchIntentForPackage(pkg)
         if (i == null) {
-            Toast.makeText(ctx, "App não encontrado", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "Esse app não está instalado ou não pode ser iniciado.", Toast.LENGTH_SHORT).show()
             return
         }
-        val id = DisplayHelper(ctx).target().displayId
-        val opts = ActivityOptions.makeBasic().setLaunchDisplayId(id)
-        ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts.toBundle())
-        refreshLater()
+        try {
+            val id = DisplayHelper(ctx).target().displayId
+            val opts = ActivityOptions.makeBasic().setLaunchDisplayId(id)
+            ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts.toBundle())
+            refreshLater()
+        } catch (e: Exception) {
+            Toast.makeText(ctx, "Falha ao abrir o jogo: ${e.localizedMessage ?: "verifique a tela selecionada"}", Toast.LENGTH_LONG).show()
+        }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("KeyMapper") },
+                title = {
+                    Column {
+                        Text("KeyMapper", style = MaterialTheme.typography.titleLarge)
+                        Text("Controle e mapeamento", style = MaterialTheme.typography.labelMedium)
+                    }
+                },
+                actions = {
+                    androidx.compose.material3.IconButton(onClick = {
+                        Haptics.tick(view)
+                        refresh++
+                    }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Atualizar status")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         }
     ) { pad ->
         Column(
-            Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // ---- hero / visão geral ----
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().background(
+                        Brush.linearGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                                MaterialTheme.colorScheme.surface
+                            )
+                        )
+                    ).padding(20.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    if (connected && overlayOk) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    if (connected && overlayOk) "PRONTO PARA CONFIGURAR" else "CONFIGURAÇÃO NECESSÁRIA",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                        Text("Seu jogo, do seu jeito.", style = MaterialTheme.typography.headlineSmall)
+                        Text(
+                            "Configure os controles, ajuste a mira e mantenha o estado do serviço sob controle.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = { Haptics.tick(view); onOpenSettings(0) },
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Text("  Configurar")
+                            }
+                            OutlinedButton(
+                                onClick = { Haptics.tick(view); showSheet = true },
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Text("  Ativação")
+                            }
+                        }
+                    }
+                }
+            }
+
             // ---- status ----
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Status", style = MaterialTheme.typography.titleMedium)
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Estado do sistema", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Text(
+                                if (running) "ATIVO" else "INATIVO",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
                     StatusRow("Shizuku", connected, if (connected) "Conectado" else stateText(state))
                     StatusRow("Sobreposição de tela", overlayOk, if (overlayOk) "Permitida" else "Não permitida")
                     StatusRow("Serviço", running, if (running) "De prontidão" else "Desligado")
@@ -168,9 +278,13 @@ fun HomeScreen(repo: SettingsRepository, tick: Int, onOpenSettings: (Int) -> Uni
             }
 
             // ---- jogos: um botão para cada ----
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Jogos", style = MaterialTheme.typography.titleMedium)
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Jogos e aplicativos", style = MaterialTheme.typography.titleMedium)
                     Text(
                         if (cfg.onlyInGame)
                             "Automático: o mapeamento liga sozinho quando o jogo abrir e desliga quando você sair dele."
@@ -226,8 +340,12 @@ fun HomeScreen(repo: SettingsRepository, tick: Int, onOpenSettings: (Int) -> Uni
             }
 
             // ---- permissões ----
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Permissões", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "O app precisa de Sobreposição (HUD sobre o jogo) e da permissão do Shizuku (injetar os toques). " +
@@ -261,8 +379,12 @@ fun HomeScreen(repo: SettingsRepository, tick: Int, onOpenSettings: (Int) -> Uni
             }
 
             // ---- Wi-Fi ----
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Ativação sem computador", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "No Android 11 ou superior dá para ativar o Shizuku pela depuração sem fio (Wi-Fi), sem PC. " +
@@ -283,15 +405,16 @@ fun HomeScreen(repo: SettingsRepository, tick: Int, onOpenSettings: (Int) -> Uni
             }
 
             // ---- configurações ----
-            Button(
+            OutlinedButton(
                 onClick = {
                     Haptics.tick(view)
                     onOpenSettings(0)
                 },
-                modifier = Modifier.fillMaxWidth().height(56.dp)
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(16.dp)
             ) {
                 Icon(Icons.Filled.Settings, contentDescription = null)
-                Text("  Configurações", style = MaterialTheme.typography.titleMedium)
+                Text("  Todas as configurações", style = MaterialTheme.typography.titleMedium)
             }
         }
     }

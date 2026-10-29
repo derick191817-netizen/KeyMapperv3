@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
+import android.text.TextWatcher
+import android.text.Editable
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -128,7 +130,98 @@ class ConfigPanelView(
     }
 
     private fun assignKey(target: Int, code: Int) {
-        if (target == 2) mod { it.copy(shootKey = code) } else mod { it.copy(key = code) }
+        when (target) {
+            2 -> mod { it.copy(shootKey = code) }
+            3 -> updateGlobal { it.copy(pauseKey = code) }
+            else -> mod { it.copy(key = code) }
+        }
+    }
+
+    private fun updateGlobal(transform: (com.example.keymapper.data.AppSettings) -> com.example.keymapper.data.AppSettings) {
+        host.update(transform(host.settings()))
+        removeCallbacks(saveRunnable)
+        postDelayed(saveRunnable, 350)
+    }
+
+    /** Seção global em tabela compacta; cada valor válido é aplicado sem reconstruir o campo. */
+    private fun buildBsSettings() {
+        add(label("Configuração BS", 16f, Color.WHITE, true))
+        add(label("Ajustes globais do mouse • aplicação imediata", 11f, dim))
+        add(label("X usa escala lógica de 0 a 1000, convertida para a área do jogo; não são pixels físicos.", 10f, dim))
+        val s = host.settings()
+        add(numberSettingRow("Sensibilidade do mouse", s.bsMouseSensitivity.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
+            raw.toIntOrNull()?.takeIf { it in 0..200 }?.let { value ->
+                updateGlobal { it.copy(bsMouseSensitivity = value) }
+            }
+        })
+        add(numberSettingRow("Relação de sensibilidade", s.bsSensitivityRatio.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0.01f..10f }?.let { value ->
+                updateGlobal { it.copy(bsSensitivityRatio = value) }
+            }
+        })
+        add(numberSettingRow("Ajuste", s.bsFineTune.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
+            raw.toIntOrNull()?.takeIf { it in 1..1_000_000 }?.let { value ->
+                updateGlobal { it.copy(bsFineTune = value) }
+            }
+        })
+        add(numberSettingRow("Olhar livre posição X", s.bsLookPositionX.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
+            raw.toIntOrNull()?.takeIf { it in 0..1000 }?.let { value ->
+                updateGlobal { it.copy(bsLookPositionX = value) }
+            }
+        })
+        add(option("Suspender", "Tecla que alterna a suspensão do mapeamento. Padrão: NUM3."))
+        add(btn(
+            if (listenTarget == 3) "Pressione a tecla de suspensão..." else "Suspender: ${if (host.settings().pauseKey == KeyEvent.KEYCODE_NUMPAD_3) "NUM3" else keyLabel(host.settings().pauseKey)}",
+            listenTarget == 3
+        ) {
+            listenTarget = 3
+            hint = ""
+            build()
+        })
+        if (hint.isNotEmpty()) add(label(hint, 11f, Color.YELLOW))
+        val divider = View(context).apply {
+            setBackgroundColor(Color.argb(100, 130, 140, 155))
+        }
+        add(divider)
+        add(label("Configuração do botão selecionado", 14f, Color.WHITE, true))
+    }
+
+    private fun numberSettingRow(title: String, initial: String, inputTypeValue: Int, onValid: (String) -> Unit): View {
+        val field = EditText(context).apply {
+            setText(initial)
+            setTextColor(Color.WHITE)
+            setHintTextColor(dim)
+            textSize = 14f
+            inputType = inputTypeValue
+            setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(6), dp(8), dp(6))
+            background = GradientDrawable().apply {
+                setColor(Color.argb(255, 17, 25, 38))
+                setCornerRadius(dp(7).toFloat())
+                setStroke(dp(1), Color.argb(255, 65, 82, 105))
+            }
+        }
+        field.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val raw = s?.toString().orEmpty()
+                if (raw.isNotBlank() && raw != "-" && raw != "." && raw != ",") onValid(raw)
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(context).apply {
+                text = title
+                setTextColor(Color.WHITE)
+                textSize = 12f
+            }, LinearLayout.LayoutParams(0, dp(42), 1f))
+            addView(field, LinearLayout.LayoutParams(dp(110), dp(42)))
+            setPadding(0, dp(2), 0, dp(2))
+        }
     }
 
     private fun closeNow() {
@@ -172,8 +265,8 @@ class ConfigPanelView(
         }
         when (b.kind) {
             Kind.AIM -> buildAim(b)
-            Kind.FIRE -> buildFire(b)
-            else -> buildStandard(b)
+            Kind.FIRE -> { buildBsSettings(); buildFire(b) }
+            else -> { buildBsSettings(); buildStandard(b) }
         }
     }
 
@@ -270,21 +363,32 @@ class ConfigPanelView(
     // ===== MIRA =====
 
     private fun buildAim(b: HudButton) {
-        add(label("Botão de mira  •  ${keyLabel(b.key)}", 16f, Color.WHITE, true))
-        if (hint.isNotEmpty()) add(label(hint, 12f, Color.argb(255, 255, 200, 0)))
-        typeRow(b)
-
-        add(slider(
-            "Sensibilidade X", "Velocidade horizontal com a mira ativa. 1 = neutro (igual ao mouse), 10 = dez vezes mais rápido. Para ficar mais lento, digite menos de 1 (ex.: 0.5).",
-            b.aimSensX, 1f, 10f, 0.1f, 0f, 1000f, "%.1f"
-        ) { v -> mod { it.copy(aimSensX = v) } })
-        add(slider(
-            "Sensibilidade Y", "Velocidade vertical com a mira ativa. 1 = neutro, 10 = dez vezes mais rápido.",
-            b.aimSensY, 1f, 10f, 0.1f, 0f, 1000f, "%.1f"
-        ) { v -> mod { it.copy(aimSensY = v) } })
-        add(toggle("Suspender (Toggle)", "Ligado: um toque na tecla ativa a mira e a mantém; o próximo toque desativa. Desligado: a mira vale só enquanto a tecla está pressionada.", b.aimToggle) { v ->
+        add(label("Configuração BS", 16f, Color.WHITE, true))
+        add(label("Ajustes numéricos da mira • aplicação imediata", 11f, dim))
+        add(numberSettingRow("Sensibilidade do mouse", b.aimMouseSens.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0f..200f }?.let { value -> mod { it.copy(aimMouseSens = value) } }
+        })
+        add(numberSettingRow("Relação de sensibilidade X", b.aimSensX.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0.01f..10f }?.let { value -> mod { it.copy(aimSensX = value) } }
+        })
+        add(numberSettingRow("Relação de sensibilidade Y", b.aimSensY.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0.01f..10f }?.let { value -> mod { it.copy(aimSensY = value) } }
+        })
+        add(numberSettingRow("Ajuste / Fine Tune", b.aimGeneral.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 1f..1_000_000f }?.let { value -> mod { it.copy(aimGeneral = value) } }
+        })
+        add(numberSettingRow("Olhar livre posição X", b.aimPosX.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0f..1000f }?.let { value -> mod { it.copy(aimPosX = value) } }
+        })
+        add(numberSettingRow("Olhar livre posição Y", b.aimPosY.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0f..1000f }?.let { value -> mod { it.copy(aimPosY = value) } }
+        })
+        add(toggle("Suspender (Toggle) · tecla NUM3", "Ligado: um toque ativa a mira e o próximo desativa. Desligado: a mira vale enquanto a tecla atribuída ao botão estiver pressionada. NUM3 é a tecla global de suspensão, configurável na tabela global.", b.aimToggle) { v ->
             mod { it.copy(aimToggle = v) }
         })
+        add(label("Posições X/Y usam escala lógica de 0 a 1000; 199 é o valor inicial, não pixels físicos.", 10f, dim))
+        if (hint.isNotEmpty()) add(label(hint, 12f, Color.argb(255, 255, 200, 0)))
+        typeRow(b)
         add(slider(
             "Deadzone (zona morta)", "Ignora micro-movimentos do mouse para estabilizar a mira. 0 = desligado.",
             b.aimDeadzone, 0f, 5f, 0.1f, 0f, 100f, "%.1f"
@@ -301,10 +405,7 @@ class ConfigPanelView(
     private fun buildAimAdvanced(b: HudButton) {
         add(label("Tiro e sensibilidade", 14f, Color.WHITE, true))
         keyBlock(b, 2, "Tecla de tiro (Shoot)", "Tecla de tiro desta mira. Enquanto ela estiver pressionada, valem os multiplicadores de tiro abaixo.")
-        add(slider(
-            "Sensibilidade geral", "Multiplica toda a sensibilidade da mira. 1.0 = sem mudança. Digite até 1000.",
-            b.aimGeneral, 0.1f, 5f, 0.05f, 0f, 1000f, "%.2f"
-        ) { v -> mod { it.copy(aimGeneral = v) } })
+        add(label("Fine Tune é editado na tabela Configuração BS acima (16240 = referência neutra).", 11f, dim))
         add(slider(
             "Multiplicador de tiro X", "Sensibilidade horizontal extra enquanto a tecla de tiro está pressionada. 1.0 = sem mudança.",
             b.shootSensX, 0.1f, 5f, 0.05f, 0f, 1000f, "%.2f"
@@ -313,10 +414,7 @@ class ConfigPanelView(
             "Multiplicador de tiro Y", "Sensibilidade vertical extra enquanto a tecla de tiro está pressionada.",
             b.shootSensY, 0.1f, 5f, 0.05f, 0f, 1000f, "%.2f"
         ) { v -> mod { it.copy(shootSensY = v) } })
-        add(slider(
-            "Sensibilidade do mouse", "Escala o movimento do mouse antes da aceleração.",
-            b.aimMouseSens, 0.1f, 5f, 0.05f, 0f, 1000f, "%.2f"
-        ) { v -> mod { it.copy(aimMouseSens = v) } })
+        add(label("Sensibilidade do mouse é editada na tabela Configuração BS acima (69 = referência neutra).", 11f, dim))
         add(slider(
             "Aceleração do mouse", "0 = nenhuma (1:1). Valores maiores aceleram movimentos rápidos. De 0 a 10.",
             b.aimAccelLevel, 0f, 10f, 0.5f, 0f, 10f, "%.1f"
@@ -337,12 +435,12 @@ class ConfigPanelView(
         ) { v -> mod { it.copy(crossOpacity = v) } })
         add(slider(
             "Posição X da mira (%)", "Onde a cruz aparece e de onde o arrasto da câmera começa.",
-            b.aimPosX * 100f, 0f, 100f, 0.5f, 0f, 100f, "%.1f"
-        ) { v -> mod { it.copy(aimPosX = v / 100f) } })
+            b.aimPosX / 10f, 0f, 100f, 0.5f, 0f, 100f, "%.1f"
+        ) { v -> mod { it.copy(aimPosX = v * 10f) } })
         add(slider(
             "Posição Y da mira (%)", "0 = topo, 100 = base.",
-            b.aimPosY * 100f, 0f, 100f, 0.5f, 0f, 100f, "%.1f"
-        ) { v -> mod { it.copy(aimPosY = v / 100f) } })
+            b.aimPosY / 10f, 0f, 100f, 0.5f, 0f, 100f, "%.1f"
+        ) { v -> mod { it.copy(aimPosY = v * 10f) } })
 
         add(label("Opções", 14f, Color.WHITE, true))
         add(toggle("Inverter mira", "Mouse para cima = mira para baixo, só com esta mira ativa.", b.aimInvert) { v ->
