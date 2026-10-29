@@ -56,7 +56,7 @@ object DisplayUtils {
             h = p.y
         }
         val dm = windowCtx.resources.displayMetrics
-        val dpi = if (dm.densityDpi > 0) dm.densityDpi else Configuration.DENSITY_DEFAULT
+        val dpi = if (dm.densityDpi > 0) dm.densityDpi else 160
         val density = if (dm.density > 0f) dm.density else dpi / 160f
         return ScreenInfo(display.displayId, w, h, dpi, density, display.refreshRate, display.displayId != Display.DEFAULT_DISPLAY)
     }
