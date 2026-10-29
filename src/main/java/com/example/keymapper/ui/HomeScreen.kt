@@ -163,8 +163,8 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
             TopAppBar(
                 title = {
                     Column {
-                        Text("KEYMAPPER", style = MaterialTheme.typography.titleMedium)
-                        Text("CENTRAL DE CONTROLE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("KeyMapper", style = MaterialTheme.typography.titleLarge)
+                        Text("PAINEL DE CONTROLE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 },
                 actions = {
@@ -184,7 +184,7 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
     ) { pad ->
         Column(
             Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // ---- hero / visão geral ----
             Card(
@@ -261,7 +261,7 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
             // ---- status ----
             Card(
                 Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -290,7 +290,7 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
             // ---- jogos: um botão para cada ----
             Card(
                 Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -352,7 +352,7 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
             // ---- permissões ----
             Card(
                 Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -391,7 +391,7 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
             // ---- Wi-Fi ----
             Card(
                 Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

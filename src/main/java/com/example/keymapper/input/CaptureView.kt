@@ -146,7 +146,6 @@ class CaptureView(
             fallbackX = event.x
             fallbackY = event.y
             if (dx.isFinite() && dy.isFinite() && (dx != 0f || dy != 0f)) {
-                Log.d(TAG, "Mouse $dx,$dy")
                 InputDiagnostics.recordMouse(dx, dy)
                 try { onDelta(dx, dy) } catch (t: Throwable) { Log.e(TAG, "Erro encaminhando movimento do mouse", t) }
             }
@@ -170,7 +169,6 @@ class CaptureView(
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (!want) return super.onKeyDown(keyCode, event)
         if (event.repeatCount == 0 && heldKeys.add(keyCode)) {
-            Log.d(TAG, "Tecla $keyCode DOWN")
             InputDiagnostics.recordKey(true)
             safeKey(keyCode, true)
         }
@@ -180,7 +178,6 @@ class CaptureView(
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (!want) return super.onKeyUp(keyCode, event)
         if (heldKeys.remove(keyCode)) {
-            Log.d(TAG, "Tecla $keyCode UP")
             InputDiagnostics.recordKey(false)
             safeKey(keyCode, false)
         }

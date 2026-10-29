@@ -193,13 +193,13 @@ class ConfigPanelView(
             }
         })
         add(divider())
-        add(tableNumberRow("Olhar livre posição X", s.bsLookPositionX.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
+        add(tableNumberRow("Posição X da câmera livre", s.bsLookPositionX.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
             raw.toIntOrNull()?.takeIf { it in 0..1000 }?.let { value ->
                 updateGlobal { it.copy(bsLookPositionX = value) }
             }
         })
         add(divider())
-        add(sectionTitle("Modo de Olhar ao redor"))
+        add(sectionTitle("Modo de câmera"))
         add(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL

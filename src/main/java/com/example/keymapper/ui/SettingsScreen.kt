@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -217,20 +218,29 @@ fun SettingsScreen(viewModel: SettingsViewModel, tick: MutableIntState, onBack: 
         snackbarHost = { SnackbarHost(snack) },
         topBar = { Header(hw, state, running, dirty, onBack) },
         bottomBar = {
-            Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(onClick = { restoreDefaults() }, modifier = Modifier.weight(1.3f)) {
-                        Text("Restaurar padrões")
-                    }
-                    OutlinedButton(onClick = { cancel() }, enabled = dirty, modifier = Modifier.weight(1f)) {
-                        Text("Cancelar")
-                    }
-                    Button(onClick = { save() }, enabled = dirty && !conflict, modifier = Modifier.weight(1f)) {
-                        Text("Salvar")
+            Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    if (maxWidth < 430.dp) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { cancel() }, enabled = dirty, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+                                Button(onClick = { save() }, enabled = dirty && !conflict, modifier = Modifier.weight(1f)) { Text("Salvar") }
+                            }
+                            TextButton(onClick = { restoreDefaults() }, modifier = Modifier.fillMaxWidth()) { Text("Restaurar padrões") }
+                        }
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(onClick = { restoreDefaults() }, modifier = Modifier.weight(1.3f)) { Text("Restaurar padrões") }
+                            OutlinedButton(onClick = { cancel() }, enabled = dirty, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+                            Button(onClick = { save() }, enabled = dirty && !conflict, modifier = Modifier.weight(1f)) { Text("Salvar") }
+                        }
                     }
                 }
             }
@@ -752,7 +762,7 @@ private fun AimTab(d: AppSettings, edit: Edit) {
         d.globalSens, 0.2f, 3f, 0.05f, absMin = 0f, absMax = 1000f
     ) { v -> edit { it.copy(globalSens = v) } }
     SliderRow(
-        "Raio da área de câmera", "Apenas visual: tamanho do círculo OLHAR no modo edição. O giro usa os limites reais da tela.",
+        "Tamanho da área de câmera", "Define o tamanho visual da zona de câmera no editor. O movimento continua limitado à área real da tela.",
         d.lookR, 0.05f, 0.9f, 0.01f, absMin = 0.02f, absMax = 1f
     ) { v -> edit { it.copy(lookR = v) } }
     SliderRow(
@@ -760,8 +770,8 @@ private fun AimTab(d: AppSettings, edit: Edit) {
         d.lookIntervalMs.toFloat(), 1f, 16f, 1f, "%.0f", absMin = 1f, absMax = 20f
     ) { v -> edit { it.copy(lookIntervalMs = v.toInt()) } }
     DropdownRow(
-        "Modo de rotação da mira",
-        "Como a câmera continua girando quando o mouse passa da borda. Cada botão de mira pode ter o seu (na engrenagem dele).",
+        "Comportamento da câmera",
+        "Define como a câmera responde quando o movimento do mouse alcança a borda da tela. Cada botão de mira pode ter sua própria configuração.",
         listOf(
             Rot.AUTO to "Automático (Infinito / Centro)",
             Rot.CENTER to "Somente Centro (jogos 2D/incompatíveis)",

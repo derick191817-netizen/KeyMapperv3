@@ -125,7 +125,12 @@ data class HudButton(
                 return if (value.isFinite()) value.coerceIn(min, max) else default
             }
             val name = b.optString("name", "").take(64)
-            val macro = b.optJSONArray("macro")?.let { m -> (0 until m.length()).map { m.getInt(it) } } ?: emptyList()
+            // Macros são limitadas para evitar configurações corrompidas gerarem listas enormes.
+            val macro = b.optJSONArray("macro")?.let { m ->
+                (0 until minOf(m.length(), 128)).mapNotNull { i ->
+                    runCatching { m.getInt(i) }.getOrNull()?.takeIf { it >= 0 }
+                }.distinct()
+            } ?: emptyList()
             val kind: Int
             val mode: Int
             if (b.has("type")) {
@@ -168,25 +173,29 @@ data class HudButton(
                 delayMs = b.optInt("delayMs", 0).coerceIn(0, 500),
                 macro = macro,
                 name = name,
-                aimSensX = b.optDouble("aimSensX", 0.9).toFloat(),
-                aimSensY = b.optDouble("aimSensY", 0.9).toFloat(),
+                aimSensX = finiteFloat("aimSensX", 0.9f, 0.01f, 100f),
+                aimSensY = finiteFloat("aimSensY", 0.9f, 0.01f, 100f),
                 aimToggle = b.optBoolean("aimToggle", false),
                 mouseAim = b.optBoolean("mouseAim", true),
                 rotMode = b.optInt("rotMode", -1).coerceIn(-1, 3),
-                aimDeadzone = b.optDouble("aimDeadzone", 0.0).toFloat(),
+                aimDeadzone = finiteFloat("aimDeadzone", 0f, 0f, 100f),
                 shootKey = b.optInt("shootKey", -1),
-                shootSensX = b.optDouble("shootSensX", 1.0).toFloat(),
-                shootSensY = b.optDouble("shootSensY", 1.0).toFloat(),
-                aimGeneral = if (!tuningV2 && oldGeneral <= 5f) oldGeneral * 16240f else oldGeneral,
-                aimMouseSens = if (!tuningV2 && oldMouseSens <= 5f) oldMouseSens * 69f else oldMouseSens,
-                aimAccelLevel = b.optDouble("aimAccelLevel", 0.0).toFloat(),
-                crossSize = b.optDouble("crossSize", 5.0).toFloat(),
-                crossOpacity = b.optDouble("crossOpacity", 100.0).toFloat(),
+                shootSensX = finiteFloat("shootSensX", 1f, 0.01f, 100f),
+                shootSensY = finiteFloat("shootSensY", 1f, 0.01f, 100f),
+                aimGeneral = (if (!tuningV2 && oldGeneral <= 5f) oldGeneral * 16240f else oldGeneral)
+                    .takeIf { it.isFinite() }?.coerceIn(1f, 1_000_000f) ?: 16240f,
+                aimMouseSens = (if (!tuningV2 && oldMouseSens <= 5f) oldMouseSens * 69f else oldMouseSens)
+                    .takeIf { it.isFinite() }?.coerceIn(0.01f, 1000f) ?: 69f,
+                aimAccelLevel = finiteFloat("aimAccelLevel", 0f, 0f, 10f),
+                crossSize = finiteFloat("crossSize", 5f, 0f, 10f),
+                crossOpacity = finiteFloat("crossOpacity", 100f, 0f, 100f),
                 aimInvert = b.optBoolean("aimInvert", false),
                 fireWithAim = b.optBoolean("fireWithAim", false),
-                aimPosX = if (!b.has("aimPosX")) 199f else if (!tuningV2 && oldPosX in 0f..1f) oldPosX * 1000f else oldPosX,
-                aimPosY = if (!b.has("aimPosY")) 199f else if (!tuningV2 && oldPosY in 0f..1f) oldPosY * 1000f else oldPosY,
-                aimZoom = b.optDouble("aimZoom", 1.0).toFloat(),
+                aimPosX = (if (!b.has("aimPosX")) 199f else if (!tuningV2 && oldPosX in 0f..1f) oldPosX * 1000f else oldPosX)
+                    .takeIf { it.isFinite() }?.coerceIn(0f, 1000f) ?: 199f,
+                aimPosY = (if (!b.has("aimPosY")) 199f else if (!tuningV2 && oldPosY in 0f..1f) oldPosY * 1000f else oldPosY)
+                    .takeIf { it.isFinite() }?.coerceIn(0f, 1000f) ?: 199f,
+                aimZoom = finiteFloat("aimZoom", 1f, 0.1f, 10f),
                 linkAimId = b.optInt("linkAimId", -1),
                 visualScale = finiteFloat("visualScale", 1f, 0.5f, 2f)
             )

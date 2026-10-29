@@ -105,14 +105,22 @@ data class AppSettings(
         put("useExternalDisplay", useExternalDisplay); put("hudWindow", hudWindow)
         put("lookModeV2", lookMode); put("lookIdleMs", lookIdleMs); put("relativeMouse", relativeMouse)
         put("lookIntervalMs", lookIntervalMs)
-        put("onlyInGame", onlyInGame); put("games", JSONArray(games))
-        put("buttons", JSONArray().apply { buttons.forEach { put(it.toJson()) } })
+        put("onlyInGame", onlyInGame); put("games", JSONArray(games.take(MAX_GAMES)))
+        put("buttons", JSONArray().apply { buttons.take(MAX_BUTTONS).forEach { put(it.toJson()) } })
         put("selectedProfilePackage", selectedProfilePackage)
-        put("profiles", JSONObject().apply { profiles.forEach { (pkg, profile) -> if (pkg.isNotBlank() && pkg.length <= 255) put(pkg, profile.toJson()) } })
+        put("profiles", JSONObject().apply { profiles.entries.take(MAX_PROFILES).forEach { (pkg, profile) -> if (pkg.isNotBlank() && pkg.length <= 255 && pkg.contains('.')) put(pkg, profile.toJson()) } })
     }.toString()
 
     companion object {
-        fun fromJson(text: String): AppSettings = try {
+        private const val MAX_SETTINGS_CHARS = 2_000_000
+        private const val MAX_BUTTONS = 128
+        private const val MAX_PROFILES = 256
+        private const val MAX_GAMES = 512
+
+        fun fromJson(text: String): AppSettings {
+            // Evita alocações desproporcionais se o valor salvo estiver corrompido.
+            if (text.length > MAX_SETTINGS_CHARS) return AppSettings()
+            return try {
             val o = JSONObject(text)
             val d = AppSettings()
             fun f(k: String, def: Float) = o.optDouble(k, def.toDouble()).toFloat()
@@ -179,12 +187,12 @@ data class AppSettings(
                 // Compatibilidade ampla: preserva os pacotes escolhidos pelo usuário, inclusive
                 // apps que não estavam na lista padrão. Entradas vazias são descartadas.
                 games = o.optJSONArray("games")?.let { a ->
-                    (0 until a.length()).mapNotNull { i -> runCatching { a.getString(i) }.getOrNull() }
+                    (0 until minOf(a.length(), MAX_GAMES)).mapNotNull { i -> runCatching { a.getString(i) }.getOrNull() }
                         .map { it.trim() }.filter { it.isNotEmpty() && it.length <= 255 }.distinct()
                 } ?: d.games,
                 buttons = o.optJSONArray("buttons")?.let { a ->
                     // tolerante: um botão corrompido é ignorado, os demais são mantidos
-                    val list = (0 until a.length()).mapNotNull { i ->
+                    val list = (0 until minOf(a.length(), MAX_BUTTONS)).mapNotNull { i ->
                         try {
                             HudButton.fromJson(a.getJSONObject(i))
                         } catch (e: Exception) {
@@ -196,9 +204,9 @@ data class AppSettings(
                 profiles = o.optJSONObject("profiles")?.let { po ->
                     val parsed = linkedMapOf<String, AppProfile>()
                     val keys = po.keys()
-                    while (keys.hasNext()) {
+                    while (keys.hasNext() && parsed.size < MAX_PROFILES) {
                         val pkg = keys.next()
-                        if (pkg.isNotBlank() && pkg.length <= 255) {
+                        if (pkg.isNotBlank() && pkg.length <= 255 && pkg.contains('.')) {
                             runCatching { parsed[pkg] = AppProfile.fromJson(po.getJSONObject(pkg), d) }
                         }
                     }
@@ -207,8 +215,9 @@ data class AppSettings(
                 selectedProfilePackage = o.optString("selectedProfilePackage", d.selectedProfilePackage)
                     .trim().takeIf { it.isNotEmpty() && it.length <= 255 } ?: d.selectedProfilePackage
             )
-        } catch (e: Exception) {
-            AppSettings()
+            } catch (e: Exception) {
+                AppSettings()
+            }
         }
     }
 }

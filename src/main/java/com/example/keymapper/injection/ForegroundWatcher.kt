@@ -5,50 +5,43 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 
 /**
- * Descobre qual app está em primeiro plano, via Shizuku (IActivityTaskManager.getTasks).
- * Não precisa de permissão no Manifest. Se não for possível detectar (sem Shizuku,
- * ou Android que mudou a API), informa null e o serviço mantém o overlay ligado.
+ * Detects the foreground package through Shizuku. Polling is limited to one query per second
+ * while enabled; callbacks from an older run are discarded after stop/restart.
  */
 class ForegroundWatcher(private val onChange: (String?) -> Unit) {
+    companion object { private const val TAG = "KeyMapperForeground" }
+
     private val thread = HandlerThread("fg-watch").also { it.start() }
     private val handler = Handler(thread.looper)
     private val main = Handler(Looper.getMainLooper())
 
-    @Volatile
-    private var running = false
-    private var last: String? = "?"   // sentinela: o primeiro resultado sempre é informado
-    private var atm: Any? = null
+    @Volatile private var running = false
+    @Volatile private var generation = 0L
+    @Volatile private var last: String? = "?"
+    @Volatile private var atm: Any? = null
 
     @Volatile
     var supported = false
         private set
 
-    private val tick = object : Runnable {
-        override fun run() {
-            if (!running) return
-            val pkg = topPackage()
-            if (pkg != last) {
-                last = pkg
-                main.post { onChange(pkg) }
-            }
-            handler.postDelayed(this, 1000)
-        }
-    }
-
     fun start() {
         if (running) return
         running = true
+        val token = ++generation
         last = "?"
-        handler.post(tick)
+        handler.post { tick(token) }
     }
 
     fun stop() {
         running = false
+        generation++
         handler.removeCallbacksAndMessages(null)
+        main.removeCallbacksAndMessages(null)
     }
 
     fun shutdown() {
@@ -56,38 +49,63 @@ class ForegroundWatcher(private val onChange: (String?) -> Unit) {
         thread.quitSafely()
     }
 
+    private fun tick(token: Long) {
+        if (!running || token != generation) return
+        val pkg = topPackage()
+        if (pkg != last) {
+            last = pkg
+            main.post {
+                if (running && token == generation) {
+                    try {
+                        onChange(pkg)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Falha ao entregar mudança de aplicativo em primeiro plano", e)
+                    }
+                }
+            }
+        }
+        if (running && token == generation) {
+            handler.postDelayed({ tick(token) }, 1000L)
+        }
+    }
+
     private fun service(): Any? {
         atm?.let { return it }
         return try {
-            val b = SystemServiceHelper.getSystemService("activity_task") ?: return null
+            val binder = SystemServiceHelper.getSystemService("activity_task") ?: return null
             Class.forName("android.app.IActivityTaskManager\$Stub")
                 .getMethod("asInterface", IBinder::class.java)
-                .invoke(null, ShizukuBinderWrapper(b))
+                .invoke(null, ShizukuBinderWrapper(binder))
                 .also { atm = it }
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
+            Log.w(TAG, "A API de tarefas em primeiro plano não está disponível", e)
             null
         }
     }
 
-    private fun call(o: Any, types: Array<Class<*>>, args: Array<Any>): List<*>? = try {
-        o.javaClass.getMethod("getTasks", *types).invoke(o, *args) as? List<*>
-    } catch (e: NoSuchMethodException) {
+    private fun call(service: Any, types: Array<Class<*>>, args: Array<Any>): List<*>? = try {
+        service.javaClass.getMethod("getTasks", *types).invoke(service, *args) as? List<*>
+    } catch (_: NoSuchMethodException) {
+        null
+    } catch (e: Exception) {
+        Log.w(TAG, "Falha ao consultar tarefas em primeiro plano", e)
         null
     }
 
     private fun topPackage(): String? {
-        val s = service() ?: return null
+        val service = service() ?: run { supported = false; return null }
         return try {
-            val i = Int::class.javaPrimitiveType!!
-            val z = Boolean::class.javaPrimitiveType!!
-            val tasks = call(s, arrayOf<Class<*>>(i, z, z, i), arrayOf<Any>(5, false, false, -1))
-                ?: call(s, arrayOf<Class<*>>(i, z, z), arrayOf<Any>(5, false, false))
-                ?: call(s, arrayOf<Class<*>>(i), arrayOf<Any>(5))
+            val intType = Int::class.javaPrimitiveType!!
+            val boolType = Boolean::class.javaPrimitiveType!!
+            val tasks = call(service, arrayOf(intType, boolType, boolType, intType), arrayOf(5, false, false, -1))
+                ?: call(service, arrayOf(intType, boolType, boolType), arrayOf(5, false, false))
+                ?: call(service, arrayOf(intType), arrayOf(5))
             supported = tasks != null
             val info = tasks?.firstOrNull() as? ActivityManager.RunningTaskInfo
             info?.topActivity?.packageName
-        } catch (e: Throwable) {
-            atm = null // binder pode ter morrido; tenta de novo no próximo ciclo
+        } catch (e: Exception) {
+            Log.w(TAG, "Falha ao interpretar o aplicativo em primeiro plano", e)
+            atm = null // binder/API pode ter mudado; tenta restabelecer no próximo ciclo
             supported = false
             null
         }

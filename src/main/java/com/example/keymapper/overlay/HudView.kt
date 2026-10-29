@@ -7,7 +7,6 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.MotionEvent
-import android.view.KeyEvent
 import android.view.View
 import com.example.keymapper.data.AppSettings
 import com.example.keymapper.data.HudButton
@@ -127,7 +126,7 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             drawGridLines(c, s)
         }
 
-        drawArea(c, px(s.lookX), py(s.lookY), s.lookR * m, "OLHAR", selected == LOOK, LOOK)
+        drawArea(c, px(s.lookX), py(s.lookY), s.lookR * m, "CÂMERA", selected == LOOK, LOOK)
         drawArea(c, px(s.joyX), py(s.joyY), s.joyR * m, "WASD", selected == JOY, JOY)
 
         for (b in s.buttons) {
@@ -246,52 +245,72 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
     }
 
     private fun drawToolbar(c: Canvas) {
-        val cx = 70 * dp
-        val cy = 74 * dp
-        paint.style = Paint.Style.FILL
-        paint.color = Color.argb(204, 0, 0, 0)
-        c.drawCircle(cx, cy, 56 * dp, paint)
-        text(c, "W", cx, cy - 28 * dp, 16 * dp, Color.WHITE)
-        text(c, "A", cx - 28 * dp, cy, 16 * dp, Color.WHITE)
-        text(c, "S", cx, cy + 28 * dp, 16 * dp, Color.WHITE)
-        text(c, "D", cx + 28 * dp, cy, 16 * dp, Color.WHITE)
-        chip(c, "X", 150 * dp, 30 * dp) { host.closeAll() }
-        chip(c, "⚙", 195 * dp, 30 * dp) { host.setEditing(!editing) }
-        chip(c, "+", 240 * dp, 30 * dp) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val margin = 22f * dp
+        val chipGap = 42f * dp
+        val closeX = (w - margin).coerceAtLeast(22f * dp)
+        val editX = (closeX - chipGap).coerceAtLeast(22f * dp)
+        val addX = (editX - chipGap).coerceAtLeast(22f * dp)
+        val topY = (30f * dp).coerceAtMost((h * 0.18f).coerceAtLeast(22f * dp))
+
+        // Ações ancoradas à direita da janela, calculadas em tempo real para celular e DeX.
+        chip(c, "X", closeX, topY) { host.closeAll() }
+        chip(c, "⚙", editX, topY) { host.setEditing(!editing) }
+        chip(c, "+", addX, topY) {
             if (editing) {
                 armed = true
                 host.arm()
             }
         }
+
+        if (!armed) {
+            val cx = min(70f * dp, w * 0.27f)
+            val cy = min(110f * dp, h * 0.32f).coerceAtLeast(64f * dp)
+            val radius = min(56f * dp, min(w * 0.24f, h * 0.16f)).coerceAtLeast(30f * dp)
+            paint.style = Paint.Style.FILL
+            paint.color = Color.argb(204, 0, 0, 0)
+            c.drawCircle(cx, cy, radius, paint)
+            val offset = radius * 0.5f
+            text(c, "W", cx, cy - offset, 16 * dp, Color.WHITE)
+            text(c, "A", cx - offset, cy, 16 * dp, Color.WHITE)
+            text(c, "S", cx, cy + offset, 16 * dp, Color.WHITE)
+            text(c, "D", cx + offset, cy, 16 * dp, Color.WHITE)
+        }
+
         if (editing) {
+            val helpY = (h - 26f * dp).coerceAtLeast(138f * dp)
             text(
-                c, "MODO EDIÇÃO  •  arraste a alça (pontinhos) para mover  •  toque no botão e na engrenagem para configurar",
-                width / 2f, height - 92 * dp, 12 * dp, Color.argb(230, 255, 255, 255)
+                c, "EDIÇÃO · arraste a alça para mover · toque em ⚙ para configurar",
+                w / 2f, helpY, 11 * dp, Color.argb(230, 255, 255, 255)
             )
         }
         if (editing && armed) {
-            text(c, "Novo botão: escolha o tipo e pressione uma tecla (ou M1/M2)", 400 * dp, 30 * dp, 13 * dp, Color.WHITE)
-            pill(c, "Padrão", 300 * dp, 80 * dp, armedKind == Kind.STANDARD) { armedKind = Kind.STANDARD }
-            pill(c, "Tiro", 370 * dp, 80 * dp, armedKind == Kind.FIRE) { armedKind = Kind.FIRE }
-            pill(c, "Mira", 440 * dp, 80 * dp, armedKind == Kind.AIM) { armedKind = Kind.AIM }
-            chip(c, "M1", 150 * dp, 80 * dp) { addButton(-1) }
-            chip(c, "M2", 195 * dp, 80 * dp) { addButton(-2) }
+            text(c, "Novo controle: escolha o tipo e associe uma tecla", w / 2f, topY + 36f * dp, 11 * dp, Color.WHITE)
+            val center = w / 2f
+            val pillGap = min(66f * dp, (w / 2f - 34f * dp).coerceAtLeast(30f * dp))
+            val menuY = topY + 78f * dp
+            pill(c, "Tecla", center - pillGap, menuY, armedKind == Kind.STANDARD) { armedKind = Kind.STANDARD }
+            pill(c, "Tiro", center, menuY, armedKind == Kind.FIRE) { armedKind = Kind.FIRE }
+            pill(c, "Mira", center + pillGap, menuY, armedKind == Kind.AIM) { armedKind = Kind.AIM }
+            chip(c, "M1", center - 22f * dp, menuY + 42f * dp) { addButton(-1) }
+            chip(c, "M2", center + 22f * dp, menuY + 42f * dp) { addButton(-2) }
         }
     }
 
     /** Biblioteca lateral: toque cria um controle no centro da área do jogo. */
     private fun drawButtonTray(c: Canvas) {
-        val x = width - 58f * dp
-        val startY = (height * 0.5f - 104f * dp).coerceAtLeast(100f * dp)
+        val x = (width - 12f * dp).coerceAtLeast(52f * dp)
+        // O atalho lateral fica reservado à ação exclusiva de centralizar o joystick.
+        // Criar Tecla/Tiro/Mira é feito pelo botão +, evitando duas bibliotecas concorrentes.
         val items = listOf(
-            Triple("TAP", Color.rgb(45, 105, 165), { addControl(Kind.STANDARD, KeyEvent.KEYCODE_SPACE) }),
-            Triple("FIRE", Color.rgb(165, 55, 55), { addControl(Kind.FIRE, -1) }),
-            Triple("AIM", Color.rgb(30, 135, 100), { addControl(Kind.AIM, -2) }),
             Triple("WASD", Color.rgb(95, 80, 160), { centerJoystick() })
         )
-        val w = 48f * dp
-        val h = 42f * dp
-        val gap = 9f * dp
+        val w = min(48f * dp, (width - 16f * dp).coerceAtLeast(36f * dp))
+        val h = 38f * dp
+        val gap = 6f * dp
+        val totalHeight = items.size * h + (items.size - 1) * gap
+        val startY = ((height - totalHeight) / 2f).coerceAtLeast(8f * dp)
         items.forEachIndexed { index, item ->
             val top = startY + index * (h + gap)
             val rect = RectF(x - w, top, x, top + h)
@@ -312,11 +331,6 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         Haptics.tick(this)
     }
 
-    private fun addControl(kind: Int, key: Int) {
-        armedKind = kind
-        addButton(key)
-    }
-
     private fun drawPanel(c: Canvas, w: Float, h: Float) {
         if (selected == NONE) return
         val items = ArrayList<Pair<String, () -> Unit>>()
@@ -327,12 +341,12 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             items.add("Raio -" to { sizeDelta(-0.01f) })
             items.add("Raio +" to { sizeDelta(0.01f) })
         }
-        val bw = 100 * dp
-        val bh = 40 * dp
-        val gap = 8 * dp
+        val gap = 8f * dp
+        val bh = min(40f * dp, (h - 16f * dp).coerceAtLeast(28f * dp))
+        val bw = if (items.isEmpty()) 0f else min(100f * dp, (w - 24f * dp - (items.size - 1) * gap) / items.size).coerceAtLeast(54f * dp)
         val total = items.size * bw + (items.size - 1) * gap
-        var x = (w - total) / 2
-        val y = h - bh - 24 * dp
+        var x = ((w - total) / 2f).coerceIn(8f * dp, (w - total - 8f * dp).coerceAtLeast(8f * dp))
+        val y = (h - bh - 12f * dp).coerceIn(8f * dp, (h - bh - 8f * dp).coerceAtLeast(8f * dp))
         for ((label, act) in items) {
             val r = RectF(x, y, x + bw, y + bh)
             paint.style = Paint.Style.FILL

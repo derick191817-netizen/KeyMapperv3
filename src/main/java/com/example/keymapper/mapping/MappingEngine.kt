@@ -117,6 +117,16 @@ class MappingEngine(
         touch.handler.post { handleKey(code, down) }
     }
 
+    /** Freezes new input immediately; cleanup and subsequent resume are ordered on the engine thread. */
+    fun pauseAndReleaseAll() {
+        paused = true
+        releaseAll()
+    }
+
+    fun resumeAfterConfigurationChange() {
+        touch.handler.post { paused = false }
+    }
+
     fun onMouseButton(bit: Int, down: Boolean) {
         val code = when (bit) {
             MotionEvent.BUTTON_PRIMARY -> -1
@@ -190,6 +200,8 @@ class MappingEngine(
     // ---- teclas (botões e joystick: lógica inalterada) ----
 
     private fun handleKey(code: Int, down: Boolean) {
+        // Also reject input tasks that were queued before a pause/profile transition.
+        if (paused) return
         val s = cfg()
         // Teclados físicos podem emitir vários ACTION_DOWN para a mesma tecla enquanto ela
         // permanece pressionada. Tratar esses repeats como novos cliques quebra TOGGLE,

@@ -22,7 +22,7 @@ data class AppProfile(
     val gridSnap: Int
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
-        put("buttons", JSONArray().apply { buttons.forEach { put(it.toJson()) } })
+        put("buttons", JSONArray().apply { buttons.take(128).forEach { put(it.toJson()) } })
         put("sensX", sensX.toDouble()); put("sensY", sensY.toDouble()); put("globalSens", globalSens.toDouble())
         put("buttonScale", buttonScale.toDouble()); put("hudAlpha", hudAlpha.toDouble())
         put("showHud", showHud); put("hudStyle", hudStyle)
@@ -52,7 +52,7 @@ data class AppProfile(
             }
             val buttonsJson = o.optJSONArray("buttons")
             val buttons = buttonsJson?.let { a ->
-                (0 until a.length()).mapNotNull { i -> runCatching { HudButton.fromJson(a.getJSONObject(i)) }.getOrNull() }
+                (0 until minOf(a.length(), 128)).mapNotNull { i -> runCatching { HudButton.fromJson(a.getJSONObject(i)) }.getOrNull() }
                     .distinctBy { it.id }
             } ?: fallback.buttons
             return AppProfile(

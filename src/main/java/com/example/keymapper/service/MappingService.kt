@@ -15,7 +15,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -43,8 +42,8 @@ import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 
 /**
- * Motor em foreground: START_STICKY + PARTIAL_WAKE_LOCK. Se o sistema encerrar o serviço,
- * ele reinicia e o overlay é restaurado no onCreate.
+ * Serviço de mapeamento em foreground, iniciado explicitamente pelo usuário.
+ * Não mantém wakelock nem solicita reinicialização automática após encerramento pelo sistema.
  *
  * Também reage a: monitor conectado/desconectado (DeX), rotação, mudança de densidade,
  * mouse/teclado removido ou plugado (solta os toques e continua em modo toque) e,
@@ -73,7 +72,6 @@ class MappingService : Service(), HudView.Host {
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var repo: SettingsRepository
     private lateinit var displays: DisplayHelper
-    private var wake: PowerManager.WakeLock? = null
 
     @Volatile
     private var cfg = AppSettings()
@@ -129,29 +127,31 @@ class MappingService : Service(), HudView.Host {
         } else {
             startForeground(NOTIF_ID, n)
         }
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "keymapper:mapping").apply { acquire() }
-
         scope.launch {
             repo.flow.collect { s ->
-                baseCfg = s
-                val effective = settingsForPackage(s, activeProfilePackage)
-                val hzChanged = touch != null && (effective.refreshHz != cfg.refreshHz ||
-                    effective.safeOverlay != cfg.safeOverlay || effective.captureWindow != cfg.captureWindow ||
-                    effective.hudWindow != cfg.hudWindow || effective.useExternalDisplay != cfg.useExternalDisplay)
-                cfg = effective
-                Haptics.enabled = effective.haptics
-                displays.useExternal = effective.useExternalDisplay
-                recomputeArea()
-                if (touch == null) {
-                    gameFocused = !s.onlyInGame // modo automático: começa DESLIGADO até o jogo abrir
-                    setup()
-                } else if (hzChanged) {
-                    rebuild()
-                } else {
-                    overlay?.refresh()
+                try {
+                    baseCfg = s
+                    val effective = settingsForPackage(s, activeProfilePackage)
+                    val hzChanged = touch != null && (effective.refreshHz != cfg.refreshHz ||
+                        effective.safeOverlay != cfg.safeOverlay || effective.captureWindow != cfg.captureWindow ||
+                        effective.hudWindow != cfg.hudWindow || effective.useExternalDisplay != cfg.useExternalDisplay)
+                    cfg = effective
+                    Haptics.enabled = effective.haptics
+                    displays.useExternal = effective.useExternalDisplay
+                    recomputeArea()
+                    if (touch == null) {
+                        gameFocused = !s.onlyInGame // modo automático: começa DESLIGADO até o jogo abrir
+                        setup()
+                    } else if (hzChanged) {
+                        rebuild()
+                    } else {
+                        overlay?.refresh()
+                    }
+                    updateWatcher()
+                } catch (e: Exception) {
+                    Log.e("KeyMapper", "Falha ao aplicar uma atualização de configuração; serviço preservado", e)
+                    ui.post { Toast.makeText(this@MappingService, "Falha ao aplicar configurações. Consulte o diagnóstico.", Toast.LENGTH_SHORT).show() }
                 }
-                updateWatcher()
             }
         }
     }
@@ -192,27 +192,40 @@ class MappingService : Service(), HudView.Host {
         }
         val e = MappingEngine(t, { areaRect }, { cfg }, { detectedPackage })
         engine = e
-        e.onAimChanged = { overlay?.refresh() } // redesenha a cruz de mira
+        // O motor executa na thread de injeção; atualizações de Views ficam na main thread.
+        e.onAimChanged = { ui.post { overlay?.refresh() } }
         overlay = OverlayManager(
             this, displays, this,
             refreshHz = { cfg.refreshHz },
-            onDelta = { dx, dy ->
-                Log.d("KeyMapper", "Mouse $dx,$dy")
-                if (!editing) e.onDelta(dx, dy)
-            },
-            onButton = { bit, down ->
-                Log.d("KeyMapper", "Botão do mouse $bit down=$down")
-                if (!editing) e.onMouseButton(bit, down)
-            },
-            onKey = { code, down ->
-                Log.d("KeyMapper", "Injetando tecla $code down=$down")
-                handleKey(code, down)
-            }
+            // Não registrar eventos individuais aqui: movimento pode chegar a 1000 Hz.
+            // InputDiagnostics mantém contadores agregados sem inundar o logcat.
+            onDelta = { dx, dy -> if (!editing) e.onDelta(dx, dy) },
+            onButton = { bit, down -> if (!editing) e.onMouseButton(bit, down) },
+            onKey = { code, down -> handleKey(code, down) }
         )
         watcher = ForegroundWatcher { pkg -> onForeground(pkg) }
-        displays.register(displayListener, ui)
-        (getSystemService(INPUT_SERVICE) as InputManager).registerInputDeviceListener(inputListener, ui)
-        rebuild()
+        try {
+            displays.register(displayListener, ui)
+            (getSystemService(INPUT_SERVICE) as InputManager).registerInputDeviceListener(inputListener, ui)
+            rebuild()
+        } catch (e: Exception) {
+            Log.e("KeyMapper", "Falha durante a inicialização do motor de mapeamento", e)
+            try { displays.unregister(displayListener) } catch (cleanup: Exception) {
+                Log.w("KeyMapper", "Falha ao limpar listener de tela após inicialização incompleta", cleanup)
+            }
+            try { (getSystemService(INPUT_SERVICE) as InputManager).unregisterInputDeviceListener(inputListener) }
+            catch (cleanup: Exception) { Log.w("KeyMapper", "Falha ao limpar listener de entrada após inicialização incompleta", cleanup) }
+            try { overlay?.hide() } catch (cleanup: Exception) { Log.w("KeyMapper", "Falha ao limpar overlay após inicialização incompleta", cleanup) }
+            overlay = null
+            engine?.releaseAll()
+            engine = null
+            touch?.onFailure = null
+            touch?.shutdown()
+            touch = null
+            watcher?.shutdown()
+            watcher = null
+            ui.post { Toast.makeText(this, "Não foi possível iniciar o mapeamento. Verifique permissões e logs.", Toast.LENGTH_LONG).show() }
+        }
     }
 
     // ---- jogo em primeiro plano ----
@@ -230,6 +243,7 @@ class MappingService : Service(), HudView.Host {
         } else {
             w.stop()
             val hadProfile = activeProfilePackage != null
+            if (hadProfile) engine?.pauseAndReleaseAll()
             activeProfilePackage = null
             cfg = baseCfg
             recomputeArea()
@@ -238,6 +252,7 @@ class MappingService : Service(), HudView.Host {
                 rebuild()
             } else if (hadProfile) {
                 overlay?.refresh()
+                if (!paused) engine?.resumeAfterConfigurationChange()
             }
         }
     }
@@ -251,22 +266,27 @@ class MappingService : Service(), HudView.Host {
         val active = baseCfg.games.contains(pkg)
         if (active) {
             val packageChanged = activeProfilePackage != pkg
-            activeProfilePackage = pkg
-            cfg = settingsForPackage(baseCfg, pkg)
-            recomputeArea()
             if (!gameFocused || packageChanged) {
+                // Freeze synchronously before changing cfg; queued old-profile events are rejected.
+                engine?.pauseAndReleaseAll()
                 gameFocused = true
-                engine?.releaseAll()
-                rebuild()
+                activeProfilePackage = pkg
+                cfg = settingsForPackage(baseCfg, pkg)
+                recomputeArea()
+                rebuild(preserveEnginePause = true)
+                if (!paused) engine?.resumeAfterConfigurationChange()
             } else {
+                activeProfilePackage = pkg
+                cfg = settingsForPackage(baseCfg, pkg)
+                recomputeArea()
                 overlay?.refresh()
             }
         } else if (gameFocused) {
+            engine?.pauseAndReleaseAll()
             gameFocused = false
             activeProfilePackage = null
             cfg = baseCfg
             recomputeArea()
-            engine?.releaseAll()
             overlay?.hide()
         }
     }
@@ -308,13 +328,15 @@ class MappingService : Service(), HudView.Host {
         }
     }
 
-    private fun rebuild() {
+    private fun rebuild(preserveEnginePause: Boolean = false) {
         val ov = overlay ?: return
         refreshInfo()
         engine?.releaseAll()
         editing = false
-        paused = false
-        engine?.paused = false
+        if (!preserveEnginePause) {
+            paused = false
+            engine?.paused = false
+        }
         if (cfg.onlyInGame && !gameFocused) {
             ov.hide()
             return
@@ -439,7 +461,9 @@ class MappingService : Service(), HudView.Host {
             ACTION_STOP -> stopSelf()
             ACTION_EDIT -> setEditing(!editing)
         }
-        return START_STICKY
+        // Não ressuscitar o motor automaticamente após encerramento pelo sistema.
+        // O usuário pode reativá-lo explicitamente; autoStart é tratado pelo receiver.
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -450,22 +474,26 @@ class MappingService : Service(), HudView.Host {
         try {
             displays.unregister(displayListener)
         } catch (e: Exception) {
+            Log.w("KeyMapper", "Falha ao remover listener de tela durante o encerramento", e)
         }
         try {
             (getSystemService(INPUT_SERVICE) as InputManager).unregisterInputDeviceListener(inputListener)
         } catch (e: Exception) {
+            Log.w("KeyMapper", "Falha ao remover listener de dispositivos durante o encerramento", e)
         }
         watcher?.shutdown()
         watcher = null
-        try { overlay?.hide() } catch (_: Throwable) { }
+        try {
+            overlay?.hide()
+        } catch (e: Exception) {
+            Log.w("KeyMapper", "Falha ao ocultar overlay durante o encerramento", e)
+        }
         overlay = null
         engine?.releaseAll()
         engine = null
         touch?.onFailure = null
         touch?.shutdown()
         touch = null
-        wake?.takeIf { it.isHeld }?.release()
-        wake = null
         super.onDestroy()
     }
 

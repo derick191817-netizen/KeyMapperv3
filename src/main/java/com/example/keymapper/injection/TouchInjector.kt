@@ -34,7 +34,7 @@ class TouchInjector(
         private const val TAG = "KeyMapperInjector"
     }
 
-    private val thread = HandlerThread("mapper-inject", Process.THREAD_PRIORITY_URGENT_DISPLAY)
+    private val thread = HandlerThread("mapper-inject", Process.THREAD_PRIORITY_DISPLAY)
         .also { it.start() }
     val handler = Handler(thread.looper)
 
@@ -316,7 +316,6 @@ class TouchInjector(
                     Log.d(TAG, "setDisplayId indisponível; usando display padrão", t)
                 }
             }
-            Log.d("KeyMapper", "Injetando evento action=${ev.actionMasked} display=${displayId()}")
             ok = injector.inject(ev)
         } catch (t: Throwable) {
             ok = false

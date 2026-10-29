@@ -6,6 +6,7 @@ import android.view.Display
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.util.Log
 import android.view.WindowManager.LayoutParams as WLP
 import com.example.keymapper.display.DisplayHelper
 import com.example.keymapper.display.DisplayUtils
@@ -47,6 +48,37 @@ class OverlayManager(
     private var captureEnabled = false
     private var cursorBoundsWidth = 0
     private var cursorBoundsHeight = 0
+    // Cursor visual atualizado no máximo uma vez por frame, não uma vez por evento do mouse.
+    private var pendingCursorDx = 0f
+    private var pendingCursorDy = 0f
+    private var cursorMoveScheduled = false
+    private val cursorMoveFrame = Runnable { runCursorMoveFrame() }
+
+    private fun runCursorMoveFrame() {
+        cursorMoveScheduled = false
+        val dx = pendingCursorDx
+        val dy = pendingCursorDy
+        pendingCursorDx = 0f
+        pendingCursorDy = 0f
+        val cursor = virtualCursor
+        if (cursor != null && cursor.visibility == View.VISIBLE && cursorBoundsWidth > 0 && cursorBoundsHeight > 0) {
+            cursorX = (cursorX + dx).coerceIn(0f, cursorBoundsWidth.toFloat())
+            cursorY = (cursorY + dy).coerceIn(0f, cursorBoundsHeight.toFloat())
+            cursorLp?.let { lp ->
+                lp.x = (cursorX - cursorWindowSize / 2f).toInt()
+                lp.y = (cursorY - cursorWindowSize / 2f).toInt()
+                try {
+                    wm?.updateViewLayout(cursor, lp)
+                    cursor.invalidate()
+                } catch (e: Exception) {
+                    Log.w("KeyMapperOverlay", "Falha ao atualizar a posição do cursor virtual", e)
+                }
+            }
+        }
+        if ((pendingCursorDx != 0f || pendingCursorDy != 0f) && !cursorMoveScheduled) {
+            virtualCursor?.let { cursorMoveScheduled = true; it.postOnAnimation(cursorMoveFrame) }
+        }
+    }
 
     var capture: CaptureView? = null
         private set
@@ -85,7 +117,9 @@ class OverlayManager(
             if (focusable && panel == null && quick == null && hud?.editing != true) {
                 c.post { if (capture === c && captureEnabled) { c.requestFocus(); c.start() } }
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            Log.w("KeyMapperOverlay", "Falha ao atualizar foco da janela de captura", e)
+        }
     }
 
     fun show() {
@@ -175,7 +209,8 @@ class OverlayManager(
             bubble = b
             bubbleLp = blp
         } catch (e: Exception) {
-            // monitor sumiu durante a montagem: limpa e deixa o serviço tentar de novo
+            // Monitor/janela pode desaparecer durante a montagem; registre a causa antes da limpeza.
+            Log.e("KeyMapperOverlay", "Falha ao montar as janelas de overlay", e)
             hide()
         }
     }
@@ -190,17 +225,14 @@ class OverlayManager(
 
     private fun moveVirtualCursor(dx: Float, dy: Float) {
         val cursor = virtualCursor ?: return
-        if (cursor.visibility != View.VISIBLE) return
+        if (cursor.visibility != View.VISIBLE || !dx.isFinite() || !dy.isFinite()) return
         if (cursorBoundsWidth <= 0 || cursorBoundsHeight <= 0) return
-        cursorX = (cursorX + dx).coerceIn(0f, cursorBoundsWidth.toFloat())
-        cursorY = (cursorY + dy).coerceIn(0f, cursorBoundsHeight.toFloat())
-        val lp = cursorLp ?: return
-        lp.x = (cursorX - cursorWindowSize / 2f).toInt()
-        lp.y = (cursorY - cursorWindowSize / 2f).toInt()
-        try {
-            wm?.updateViewLayout(cursor, lp)
-            cursor.invalidate()
-        } catch (_: Exception) { }
+        pendingCursorDx += dx
+        pendingCursorDy += dy
+        if (!cursorMoveScheduled) {
+            cursorMoveScheduled = true
+            cursor.postOnAnimation(cursorMoveFrame)
+        }
     }
 
     private fun moveBubble(dx: Int, dy: Int) {
@@ -211,6 +243,7 @@ class OverlayManager(
         try {
             wm?.updateViewLayout(v, lp)
         } catch (e: Exception) {
+            Log.w("KeyMapperOverlay", "Falha ao mover a bolha de controle", e)
         }
     }
 
@@ -221,6 +254,7 @@ class OverlayManager(
             lp.flags = hudFlags(on)
             wm?.updateViewLayout(h, lp)
         } catch (e: Exception) {
+            Log.e("KeyMapperOverlay", "Falha ao alterar o modo de edição do HUD", e)
             return
         }
         h.editing = on
@@ -406,12 +440,14 @@ class OverlayManager(
         capture?.stop()
         captureEnabled = false
         val m = wm
+        virtualCursor?.removeCallbacks(cursorMoveFrame)
         val views = listOf<View?>(hud, capture, bubble, virtualCursor)
         for (v in views) {
             if (v == null) continue
             try {
                 m?.removeView(v)
             } catch (e: Exception) {
+                Log.w("KeyMapperOverlay", "Falha ao remover uma janela de overlay", e)
             }
         }
         hud = null
@@ -423,6 +459,9 @@ class OverlayManager(
         cursorWindowSize = 0
         cursorBoundsWidth = 0
         cursorBoundsHeight = 0
+        pendingCursorDx = 0f
+        pendingCursorDy = 0f
+        cursorMoveScheduled = false
         captureEnabled = false
         wm = null
         wctx = null
