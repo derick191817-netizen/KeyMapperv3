@@ -326,11 +326,15 @@ class OverlayManager(
             )
             lp.gravity = gravity
             lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
-                WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
             manager.addView(p, lp)
             panel = p
             updateCursorVisibility()
-            p.post { p.requestFocus() }
+            p.post {
+                p.isFocusable = true
+                p.isFocusableInTouchMode = true
+                p.requestFocus()
+            }
         } catch (e: Exception) {
             panel = null
             if (hud?.editing != true) {

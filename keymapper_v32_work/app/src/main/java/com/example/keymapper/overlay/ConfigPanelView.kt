@@ -1,6 +1,5 @@
 package com.example.keymapper.overlay
 
-import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -12,6 +11,10 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.content.Context
+import android.view.MotionEvent
+import android.widget.CheckBox
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -63,7 +66,7 @@ class ConfigPanelView(
         isFocusable = true
         isFocusableInTouchMode = true
         background = GradientDrawable().apply {
-            setColor(Color.argb(246, 22, 22, 26))
+            setColor(Color.rgb(10, 15, 26))
             cornerRadius = dp(18).toFloat()
         }
 
@@ -152,39 +155,158 @@ class ConfigPanelView(
         postDelayed(saveRunnable, 350)
     }
 
-    /** Seção global em tabela compacta; cada valor válido é aplicado sem reconstruir o campo. */
+    /** Painel compacto inspirado no editor de controles BlueStacks. */
     private fun buildBsSettings() {
-        add(sectionTitle("SENSIBILIDADE"))
         val s = host.settings()
-        add(numberSettingRow("Sensibilidade do mouse", s.bsMouseSensitivity.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
+        add(TextView(context).apply {
+            text = "Configuração BS"
+            setTextColor(Color.WHITE)
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(8), 0, dp(12))
+        })
+        add(tableHeader("Parâmetro de partida", "Valor"))
+        add(divider())
+
+        add(tableKeyRow("Suspender", keyLabel(s.pauseKey)) {
+            listenTarget = 3
+            hint = "Pressione uma tecla para definir Suspender"
+            build()
+        })
+        add(divider())
+        add(tableNumberRow("Sensibilidade do mouse", s.bsMouseSensitivity.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
             raw.toIntOrNull()?.takeIf { it in 0..200 }?.let { value ->
                 updateGlobal { it.copy(bsMouseSensitivity = value) }
             }
         })
-        add(numberSettingRow("Relação de sensibilidade", s.bsSensitivityRatio.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
+        add(divider())
+        add(tableNumberRow("Relação de sensibilidade", s.bsSensitivityRatio.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED) { raw ->
             raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0.01f..10f }?.let { value ->
                 updateGlobal { it.copy(bsSensitivityRatio = value) }
             }
         })
-        add(numberSettingRow("Ajuste (Fine Tune)", s.bsFineTune.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
+        add(divider())
+        add(tableNumberRow("Ajuste", s.bsFineTune.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
             raw.toIntOrNull()?.takeIf { it in 1..1_000_000 }?.let { value ->
                 updateGlobal { it.copy(bsFineTune = value) }
             }
         })
         add(divider())
-        add(sectionTitle("TECLAS"))
-        add(label("Modo Suspender", 12f, Color.WHITE))
-        add(btn(
-            if (listenTarget == 3) "Pressione a tecla de suspensão…" else "Suspender: ${keyLabel(host.settings().pauseKey)}",
-            listenTarget == 3
-        ) {
-            listenTarget = 3
-            hint = ""
-            build()
+        add(tableNumberRow("Olhar livre posição X", s.bsLookPositionX.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
+            raw.toIntOrNull()?.takeIf { it in 0..1000 }?.let { value ->
+                updateGlobal { it.copy(bsLookPositionX = value) }
+            }
+        })
+        add(divider())
+        add(sectionTitle("Modo de Olhar ao redor"))
+        add(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val enabled = s.lookMode != Rot.OFF
+            addView(CheckBox(context).apply {
+                text = "Ativar o modo"
+                setTextColor(Color.WHITE)
+                isChecked = enabled
+                buttonTintList = android.content.res.ColorStateList.valueOf(Color.rgb(59, 130, 246))
+                setOnCheckedChangeListener { _, checked ->
+                    updateGlobal { it.copy(lookMode = if (checked) Rot.CENTER else Rot.OFF) }
+                }
+            }, LinearLayout.LayoutParams(0, dp(42), 1f))
         })
         if (hint.isNotEmpty()) add(label(hint, 11f, Color.YELLOW))
         add(divider())
-        add(label("Configuração do botão selecionado", 14f, Color.WHITE, true))
+        add(sectionTitle("CONFIGURAÇÃO DO BOTÃO SELECIONADO"))
+    }
+
+    private fun tableHeader(left: String, right: String): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(8), dp(5), dp(8), dp(5))
+        addView(TextView(context).apply {
+            text = "Para de partida | NUM1"
+            setTextColor(Color.rgb(155, 190, 235))
+            textSize = 11f
+            setTypeface(typeface, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addView(TextView(context).apply {
+            text = "Para de partida"
+            setTextColor(Color.rgb(155, 190, 235))
+            textSize = 11f
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.WRAP_CONTENT))
+        setBackgroundColor(Color.rgb(13, 22, 38))
+    }
+
+    private fun tableKeyRow(title: String, value: String, onClick: () -> Unit): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(8), dp(2), dp(4), dp(2))
+        addView(TextView(context).apply {
+            text = title
+            setTextColor(Color.WHITE)
+            textSize = 13f
+        }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        addView(btn(value, false, gray, onClick), LinearLayout.LayoutParams(dp(112), dp(38)))
+    }
+
+    private fun tableNumberRow(title: String, initial: String, inputTypeValue: Int, onValid: (String) -> Unit): View {
+        val field = EditText(context).apply {
+            setText(initial)
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.rgb(145, 160, 180))
+            textSize = 14f
+            inputType = inputTypeValue
+            setSingleLine(true)
+            setShowSoftInputOnFocus(true)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            gravity = Gravity.CENTER
+            setPadding(dp(5), dp(4), dp(5), dp(4))
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(12, 19, 31))
+                setCornerRadius(dp(4).toFloat())
+                setStroke(dp(1), Color.rgb(30, 58, 138))
+            }
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    clearFocus()
+                    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(windowToken, 0)
+                    true
+                } else false
+            }
+            setOnTouchListener { v, event ->
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    v.requestFocus()
+                    v.post {
+                        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                            ?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
+                false
+            }
+        }
+        field.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val raw = s?.toString().orEmpty()
+                if (raw.isNotBlank() && raw != "." && raw != ",") onValid(raw)
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(2), dp(4), dp(2))
+            addView(TextView(context).apply {
+                text = title
+                setTextColor(Color.WHITE)
+                textSize = 13f
+            }, LinearLayout.LayoutParams(0, dp(42), 1f))
+            addView(field, LinearLayout.LayoutParams(dp(112), dp(38)))
+        }
     }
 
     private fun numberSettingRow(title: String, initial: String, inputTypeValue: Int, onValid: (String) -> Unit): View {
@@ -267,7 +389,7 @@ class ConfigPanelView(
             return
         }
         when (b.kind) {
-            Kind.AIM -> buildAim(b)
+            Kind.AIM -> { buildBsSettings(); buildAim(b) }
             Kind.FIRE -> { buildBsSettings(); buildFire(b) }
             else -> { buildBsSettings(); buildStandard(b) }
         }
@@ -570,7 +692,7 @@ class ConfigPanelView(
     }
 
     private fun divider(): View = View(context).apply {
-        setBackgroundColor(Color.argb(110, 105, 130, 160))
+        setBackgroundColor(Color.rgb(30, 58, 138))
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
             topMargin = dp(4)
             bottomMargin = dp(4)

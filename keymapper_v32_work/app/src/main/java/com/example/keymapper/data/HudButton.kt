@@ -39,8 +39,8 @@ object Rot {
 fun keyLabel(code: Int): String = when (code) {
     -1 -> "Mouse Esquerdo"
     -2 -> "Mouse Direito"
-    -3 -> "Botão do Meio"
-    KeyEvent.KEYCODE_NUMPAD_3 -> "NUM 3"
+    -3 -> "Scroll"
+    KeyEvent.KEYCODE_NUMPAD_3 -> "NUM3"
     else -> KeyEvent.keyCodeToString(code).removePrefix("KEYCODE_")
         .replace("NUMPAD_", "NUM ")
 }
