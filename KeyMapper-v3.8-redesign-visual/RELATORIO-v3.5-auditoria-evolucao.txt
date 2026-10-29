@@ -1,0 +1,78 @@
+KEYMAPPER v3.5 — AUDITORIA E EVOLUÇÃO DO CAMINHO DE ENTRADA
+Data: 2026-10-29
+Base analisada: KeyMapper-v3.4-painel-configuracao-bs.zip
+
+RESUMO
+Esta entrega é uma evolução incremental do caminho de entrada, não uma alegação de que todo o escopo do PROMPT MESTRE foi concluído. O projeto foi inspecionado e recebeu correções no foco do painel, na preservação de deltas relativos, na captura e no diagnóstico interno.
+
+PROBLEMAS IDENTIFICADOS E CORREÇÕES
+1. TouchInjector.injectVirtualMove descartava todos os deltas recebidos dentro do intervalo mínimo de 9 ms. Isso podia perder distância total em mouse de alta frequência.
+   Correção: os deltas relativos agora são acumulados e enviados em um flush agendado, em vez de descartados. O limite interno continua agrupando eventos a aproximadamente 120 Hz; não representa garantia de latência ou de entrega pelo Android/jogo.
+
+2. CaptureView usava event.x/event.y como fallback mesmo quando Pointer Capture estava ativa e os eixos relativos chegavam zerados. Isso podia converter coordenadas absolutas em um salto de mira.
+   Correção: o fallback absoluto foi removido no caminho com captura. No fallback sem captura, a primeira posição só inicializa a referência e não gera um delta artificial.
+
+3. A janela do painel configurava SOFT_INPUT_STATE_ALWAYS_HIDDEN, podendo dificultar a abertura do teclado virtual.
+   Correção: o painel usa SOFT_INPUT_ADJUST_RESIZE | SOFT_INPUT_STATE_UNCHANGED, continua focável, e os campos mantêm solicitação explícita do IME ao toque. A janela de captura é suspensa enquanto o painel está aberto.
+
+4. O TouchInjector executava SystemClock.sleep(extraDelayMs) após injeções, bloqueando a thread de eventos conforme modo de desempenho/RAM.
+   Correção: removida a pausa artificial e o cálculo de atraso extra. O limitador agora agrega movimentos sem dormir na thread.
+
+5. O diagnóstico anterior registrava falhas/crashes, mas não fornecia um resumo do fluxo de entrada.
+   Correção: adicionada InputDiagnostics com contadores de movimentos, teclas, transições de botão, estado de captura/foco, resultados de injeção e duração interna média/p95 da chamada de injeção. Os dados ficam em memória; não registra o conteúdo de teclas nem dados pessoais.
+
+ARQUIVOS MODIFICADOS
+- app/src/main/java/com/example/keymapper/diagnostics/InputDiagnostics.kt (novo)
+- app/src/main/java/com/example/keymapper/input/CaptureView.kt
+- app/src/main/java/com/example/keymapper/injection/TouchInjector.kt
+- app/src/main/java/com/example/keymapper/overlay/OverlayManager.kt
+- app/src/main/java/com/example/keymapper/service/MappingService.kt
+- app/src/main/java/com/example/keymapper/ui/SettingsScreen.kt
+
+ARQUITETURA DE ENTRADA OBSERVADA
+Dispositivo físico -> CaptureView (janela de overlay de 1x1, focável e não tocável) -> callbacks -> MappingService/MappingEngine -> TouchInjector em HandlerThread -> ShizukuInjector -> IInputManager.injectInputEvent via API/reflexão.
+O HUD e os painéis são janelas SYSTEM_ALERT_WINDOW. A captura de ponteiro depende de foco de janela/view e não é uma captura global garantida.
+
+MOUSE RELATIVO E LIMITAÇÕES
+- A captura usa Pointer Capture quando o Android concede foco e captura.
+- Os deltas são encaminhados ao MappingEngine; no modo relativo/INFINITE, TouchInjector cria MotionEvent com SOURCE_MOUSE_RELATIVE e eixos AXIS_RELATIVE_X/Y.
+- Isso não garante que o Free Fire aceite esses eventos: jogos que leem somente toque podem ignorar SOURCE_MOUSE_RELATIVE.
+- O modo CENTRO permanece como fallback de toque que reposiciona o contato ao alcançar as bordas. É um compromisso de compatibilidade, não equivalente a um emulador de PC.
+- Uma janela focável sobre outro app pode retirar o foco do jogo. Não existe garantia de captura global de mouse/teclado para um app Android comum em todos os dispositivos.
+
+DIAGNÓSTICO ADICIONADO
+A seção Diagnóstico da tela do sistema mostra um resumo da entrada recente. “Compartilhar Log de Erro” inclui contagens, estado da captura/foco e métricas internas de injeção. A duração da chamada de injeção não mede a latência completa até o jogo.
+
+VALIDAÇÕES EXECUTADAS
+- Compilação isolada de InputDiagnostics.kt com um stub de SystemClock: PASSOU.
+- Análise sintática preliminar com kotlinc dos arquivos alterados: não foram encontrados diagnósticos de sintaxe (“expecting”, “unexpected tokens”, “redeclaration”); a compilação completa não foi possível porque o ambiente não contém Gradle, Gradle Wrapper nem Android SDK/android.jar. O kotlinc isolado reportou muitos símbolos Android/Compose não resolvidos, como esperado sem essas dependências.
+- Verificação estática: não há Thread.sleep/SystemClock.sleep no código-fonte do app; não há uso de Configuration.DENSITY_DEFAULT.
+- app/build.gradle.kts e app/src/main/AndroidManifest.xml não foram modificados.
+- Integridade do ZIP verificada com unzip -t; app/build.gradle.kts e AndroidManifest.xml comparados byte a byte com a base v3.4.
+- Não houve teste em aparelho físico nem no Free Fire; não se declara o bug de foco/mira como definitivamente resolvido.
+
+TESTES DE ACEITAÇÃO — ESTADO HONESTO
+1. Mouse na interface: NÃO TESTADO em dispositivo.
+2. Mira independente das bordas: PARCIAL; existe caminho SOURCE_MOUSE_RELATIVE, aceitação pelo jogo não verificada.
+3. Acumulação de deltas relativos: IMPLEMENTADA no código; teste instrumental em aparelho pendente.
+4. Sem saltos por fallback absoluto durante Pointer Capture: CORRIGIDO no código; teste físico pendente.
+5. Ativar/desativar captura: mecanismo existente preservado; teste físico pendente.
+6. Liberação ao abrir painel/menu: lógica existente preservada e foco do painel ajustado; teste físico pendente.
+7. Soltura ao perder foco: lógica de liberação existente preservada; teste físico pendente.
+8. WASD simultâneo: implementação existente; teste físico pendente.
+9. Coordenadas por fração da área do jogo: implementação existente; matriz de resoluções pendente.
+10. Recuperação após falha de serviço: START_STICKY e recuperação do injetor existentes; teste de falha real pendente.
+11. Perfis independentes por jogo: NÃO IMPLEMENTADO como sistema completo; existe persistência de AppSettings e lista de jogos.
+12. Desconectar/reconectar periféricos: listener existente; teste físico pendente.
+13. Sem bloqueio por sleep artificial: CORRIGIDO estaticamente; perfil de desempenho real pendente.
+14. Sensibilidade reproduzível: NÃO TESTADO quantitativamente.
+15. Diagnóstico de entrada: IMPLEMENTADO parcialmente (contadores e duração interna); percentis da latência completa e taxa em tempo real não disponíveis.
+16. Limitações explicitadas: SIM, neste relatório.
+17. Teste Android real + Free Fire: NÃO EXECUTADO.
+
+PRÓXIMAS PRIORIDADES
+1. Compilar em ambiente Android SDK/Gradle e corrigir quaisquer erros de compilação reais.
+2. Testar em dispositivo real o foco do overlay, abertura do teclado, Pointer Capture e comportamento ao alternar para notificações/menus.
+3. Medir se o Free Fire aceita SOURCE_MOUSE_RELATIVE no dispositivo; se não aceitar, documentar o fallback por toque.
+4. Criar testes automatizados para a máquina de estados e as transformações de coordenadas.
+5. Só então expandir perfis por jogo, desfazer/refazer no editor e diagnóstico em tempo real.
