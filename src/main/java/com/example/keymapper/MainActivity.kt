@@ -5,6 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
+import android.util.Log
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -31,23 +36,43 @@ class MainActivity : ComponentActivity() {
     private val tick = mutableIntStateOf(0)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settingsViewModel = SettingsViewModel((application as KeyMapperApp).settingsRepository)
-        setContent {
-            val s by settingsViewModel.settings.collectAsState()
-            var screen by remember { mutableIntStateOf(0) }   // 0 = painel, 1 = configurações, 2 = editor
-            var settingsTab by remember { mutableIntStateOf(0) }
-            BackHandler(enabled = screen != 0) { screen = 0 }
-            MaterialTheme(colorScheme = schemeFor(s.theme), typography = KeyMapperTypography) {
-                Surface(Modifier.fillMaxSize()) {
-                    if (screen == 0) {
-                        HomeScreen(settingsViewModel, tick.intValue, onOpenSettings = { tab ->
-                            settingsTab = tab
-                            screen = 1
-                        }, onOpenEditor = { screen = 2 })
-                    } else if (screen == 1) {
-                        SettingsScreen(settingsViewModel, tick, onBack = { screen = 0 }, initialTab = settingsTab)
-                    } else {
-                        MappingEditorScreen(settingsViewModel, onBack = { screen = 0 })
+        try {
+            val app = application as? KeyMapperApp
+                ?: error("A classe Application KeyMapperApp não foi carregada")
+            settingsViewModel = SettingsViewModel(app.settingsRepository)
+            setContent {
+                val s by settingsViewModel.settings.collectAsState()
+                var screen by remember { mutableIntStateOf(0) }
+                var settingsTab by remember { mutableIntStateOf(0) }
+                BackHandler(enabled = screen != 0) { screen = 0 }
+                MaterialTheme(colorScheme = schemeFor(s.theme), typography = KeyMapperTypography) {
+                    Surface(Modifier.fillMaxSize()) {
+                        if (screen == 0) {
+                            HomeScreen(settingsViewModel, tick.intValue, onOpenSettings = { tab ->
+                                settingsTab = tab
+                                screen = 1
+                            }, onOpenEditor = { screen = 2 })
+                        } else if (screen == 1) {
+                            SettingsScreen(settingsViewModel, tick, onBack = { screen = 0 }, initialTab = settingsTab)
+                        } else {
+                            MappingEditorScreen(settingsViewModel, onBack = { screen = 0 })
+                        }
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e("KeyMapperStartup", "Falha ao inicializar a tela principal", t)
+            if (::settingsViewModel.isInitialized) {
+                runCatching { settingsViewModel.close() }
+            }
+            setContent {
+                MaterialTheme(colorScheme = darkColorScheme()) {
+                    Surface(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize().padding(24.dp)) {
+                            Text("KeyMapper não conseguiu iniciar a tela principal.", style = MaterialTheme.typography.titleLarge)
+                            Text("O erro foi registrado no log do Android como KeyMapperStartup. Feche e tente abrir novamente; se persistir, envie o log de falha.", modifier = Modifier.padding(top = 12.dp))
+                            Text("Tipo do erro: ${t.javaClass.simpleName}", modifier = Modifier.padding(top = 12.dp))
+                        }
                     }
                 }
             }
