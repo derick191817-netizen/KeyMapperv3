@@ -1,18 +1,43 @@
-# Compilar o KeyMapper v7.8
+# Compilar o KeyMapper 0.8.0
 
-## Pelo GitHub Actions
+## Pré-requisitos
 
-1. Extraia o conteúdo do ZIP na raiz do repositório, sem colocar tudo dentro de uma subpasta adicional.
-2. Faça commit e push, ou abra a aba **Actions** e execute **Build APK → Run workflow**.
-3. Espere todas as etapas terminarem. O workflow interrompe o processo se a compilação Kotlin, os testes, a geração do APK ou a verificação do pacote falhar.
-4. Em uma execução aprovada, abra os artefatos da execução e baixe `keymapper-debug`.
+- JDK 17
+- Android SDK com `platforms;android-34` e `build-tools;34.0.0`
+- Acesso à rede na primeira compilação para baixar Gradle 8.8 e dependências
 
-## Arquivo esperado
+O Gradle Wrapper oficial está incluído na raiz: `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar` e `gradle/wrapper/gradle-wrapper.properties`. O arquivo de propriedades fixa a distribuição Gradle 8.8 e seu checksum SHA-256 publicado oficialmente.
 
-`app/build/outputs/apk/debug/app-debug.apk`
+## Comandos
 
-O workflow usa o `aapt` para verificar o identificador `com.example.keymapper`, testa a integridade ZIP do APK e calcula um checksum SHA-256.
+Linux/macOS/GitHub Actions:
 
-## Limitações conhecidas
+```bash
+chmod +x ./gradlew
+./gradlew --no-daemon :app:tasks --all
+./gradlew --no-daemon :app:compileDebugKotlin --stacktrace
+./gradlew --no-daemon :app:testDebugUnitTest --stacktrace
+./gradlew --no-daemon :app:assembleDebug --stacktrace
+```
 
-O ZIP inicial não inclui binários do Wrapper. Para evitar inventar ou empacotar um JAR não verificado, o workflow instala Gradle 8.8 pela action oficial, gera o Wrapper oficial com a tarefa `wrapper`, valida os quatro arquivos e usa `./gradlew` nas etapas seguintes. Também publica o arquivo `keymapper-gradle-wrapper`, contendo os arquivos gerados para que possam ser adicionados ao repositório após a execução. O APK não está pré-gerado; só existe build aprovado depois de o workflow terminar com sucesso.
+Windows:
+
+```bat
+gradlew.bat :app:compileDebugKotlin --stacktrace
+gradlew.bat :app:testDebugUnitTest --stacktrace
+gradlew.bat :app:assembleDebug --stacktrace
+```
+
+## GitHub Actions
+
+1. Envie o conteúdo deste ZIP para a raiz do repositório, sem criar uma pasta externa extra.
+2. Abra **Actions → Build APK → Run workflow** ou faça push.
+3. Confirme que as etapas de validação do Wrapper, compilação Kotlin, testes, montagem e validação do APK foram concluídas.
+4. Baixe o artefato `keymapper-debug`.
+
+Saída esperada: `app/build/outputs/apk/debug/app-debug.apk`.
+O workflow verifica a integridade do APK, confirma o `applicationId` `com.example.keymapper`, gera `SHA256SUMS.txt` e falha quando nenhum APK válido é encontrado.
+
+## Limites de validação desta entrega
+
+O Wrapper foi extraído do artefato produzido pelo workflow v7.8 que terminou com sucesso e seu JAR corresponde ao checksum publicado pelo Gradle. A interface 0.8.0 é uma nova revisão: a compilação de Kotlin, os testes JUnit, o APK e os testes em dispositivo precisam ser executados de novo para esta revisão. O ambiente local de criação não dispõe de Android SDK/Gradle, então não declarar o novo APK compilado antes do workflow passar.

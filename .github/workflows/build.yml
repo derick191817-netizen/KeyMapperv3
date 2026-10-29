@@ -33,40 +33,32 @@ jobs:
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
 
-      # Este ZIP não tem Gradle Wrapper. Até que o Wrapper oficial seja gerado
-      # e validado em ambiente com Gradle, fixamos explicitamente a versão usada no CI.
-      - name: Configurar Gradle 8.8
+      - name: Configurar cache do Gradle
         uses: gradle/actions/setup-gradle@v6.4.1
         with:
-          gradle-version: '8.8'
           cache-provider: basic
 
-      # Bootstrap: como o ZIP inicial não traz Wrapper, geramos os arquivos oficiais
-      # com Gradle 8.8 instalado pela action e passamos a usar ./gradlew no restante do job.
-      - name: Gerar e validar Gradle Wrapper oficial
+      # O Wrapper oficial agora está versionado com o projeto: nenhuma instalação
+      # global do Gradle é necessária para compilar em novos runners.
+      - name: Validar Gradle Wrapper versionado
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon wrapper --gradle-version 8.8 --distribution-type bin
-          chmod +x gradlew
-          test -s gradlew
-          test -s gradlew.bat
-          test -s gradle/wrapper/gradle-wrapper.jar
-          test -s gradle/wrapper/gradle-wrapper.properties
+          chmod +x ./gradlew
+          test -s ./gradlew
+          test -s ./gradlew.bat
+          test -s ./gradle/wrapper/gradle-wrapper.jar
+          test -s ./gradle/wrapper/gradle-wrapper.properties
           grep -F 'gradle-8.8-bin.zip' gradle/wrapper/gradle-wrapper.properties
+          echo 'cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
           ./gradlew --no-daemon --version
-          mkdir -p build/wrapper-bundle
-          cp gradlew gradlew.bat build/wrapper-bundle/
-          mkdir -p build/wrapper-bundle/gradle/wrapper
-          cp gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties build/wrapper-bundle/gradle/wrapper/
-          tar -czf build/gradle-wrapper-generated.tar.gz -C build/wrapper-bundle .
 
       - name: Validar ambiente e estrutura
         shell: bash
         run: |
           set -euo pipefail
           java -version
-          gradle --version
+          ./gradlew --no-daemon --version
           sdkmanager --version
           sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           test -n "$sdk_root"
@@ -133,14 +125,5 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/debug/SHA256SUMS.txt
-          if-no-files-found: error
-          retention-days: 14
-
-
-      - name: Publicar arquivos do Gradle Wrapper gerado
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: keymapper-gradle-wrapper
-          path: build/gradle-wrapper-generated.tar.gz
           if-no-files-found: error
           retention-days: 14

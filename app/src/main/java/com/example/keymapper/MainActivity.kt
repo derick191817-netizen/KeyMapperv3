@@ -7,7 +7,15 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.material3.Text
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.unit.dp
 import android.util.Log
 import androidx.compose.material3.ColorScheme
@@ -46,16 +54,52 @@ class MainActivity : ComponentActivity() {
                 var settingsTab by remember { mutableIntStateOf(0) }
                 BackHandler(enabled = screen != 0) { screen = 0 }
                 MaterialTheme(colorScheme = schemeFor(s.theme), typography = KeyMapperTypography) {
-                    Surface(Modifier.fillMaxSize()) {
-                        if (screen == 0) {
-                            HomeScreen(settingsViewModel, tick.intValue, onOpenSettings = { tab ->
-                                settingsTab = tab
-                                screen = 1
-                            }, onOpenEditor = { screen = 2 })
-                        } else if (screen == 1) {
-                            SettingsScreen(settingsViewModel, tick, onBack = { screen = 0 }, initialTab = settingsTab)
-                        } else {
-                            MappingEditorScreen(settingsViewModel, onBack = { screen = 0 })
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        containerColor = MaterialTheme.colorScheme.background,
+                        bottomBar = {
+                            NavigationBar(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                tonalElevation = 3.dp
+                            ) {
+                                NavigationBarItem(
+                                    selected = screen == 0,
+                                    onClick = { screen = 0 },
+                                    icon = { androidx.compose.material3.Icon(Icons.Filled.Home, contentDescription = "Painel inicial") },
+                                    label = { Text("Painel") },
+                                    alwaysShowLabel = true
+                                )
+                                NavigationBarItem(
+                                    selected = screen == 2,
+                                    onClick = { screen = 2 },
+                                    icon = { androidx.compose.material3.Icon(Icons.Filled.Edit, contentDescription = "Editor de controles") },
+                                    label = { Text("Editor") },
+                                    alwaysShowLabel = true
+                                )
+                                NavigationBarItem(
+                                    selected = screen == 1,
+                                    onClick = { screen = 1 },
+                                    icon = { androidx.compose.material3.Icon(Icons.Filled.Settings, contentDescription = "Configurações") },
+                                    label = { Text("Ajustes") },
+                                    alwaysShowLabel = true
+                                )
+                            }
+                        }
+                    ) { contentPadding ->
+                        Surface(
+                            Modifier.padding(contentPadding).consumeWindowInsets(contentPadding).fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            if (screen == 0) {
+                                HomeScreen(settingsViewModel, tick.intValue, onOpenSettings = { tab ->
+                                    settingsTab = tab
+                                    screen = 1
+                                }, onOpenEditor = { screen = 2 })
+                            } else if (screen == 1) {
+                                SettingsScreen(settingsViewModel, tick, onBack = { screen = 0 }, initialTab = settingsTab)
+                            } else {
+                                MappingEditorScreen(settingsViewModel, onBack = { screen = 0 })
+                            }
                         }
                     }
                 }
@@ -90,7 +134,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Paleta central: grafite, superfícies em camadas e acento ciano discreto. */
+/** Identidade KeyMapper: grafite azulado com violeta e ciano como acentos. */
 private fun schemeFor(theme: Int): ColorScheme = when (theme) {
     1 -> darkColorScheme(
         primary = Color(0xFF75E6D0), onPrimary = Color(0xFF06211D),
@@ -126,13 +170,14 @@ private fun schemeFor(theme: Int): ColorScheme = when (theme) {
         outline = Color(0xFF354653), error = Color(0xFFFF6B72)
     )
     else -> darkColorScheme(
-        primary = Color(0xFF7DD3FC), onPrimary = Color(0xFF062331),
-        primaryContainer = Color(0xFF153744), onPrimaryContainer = Color(0xFFD8F3FF),
-        secondary = Color(0xFFB5C8D3), onSecondary = Color(0xFF1A2A32),
-        background = Color(0xFF0A0D10), surface = Color(0xFF11161A),
-        surfaceVariant = Color(0xFF1C242A), onBackground = Color(0xFFE9F0F3),
-        onSurface = Color(0xFFE9F0F3), onSurfaceVariant = Color(0xFFA1B0B8),
-        outline = Color(0xFF35434B), error = Color(0xFFFF6B72)
+        primary = Color(0xFFA78BFA), onPrimary = Color(0xFF17102E),
+        primaryContainer = Color(0xFF332653), onPrimaryContainer = Color(0xFFEDE5FF),
+        secondary = Color(0xFF67DCEB), onSecondary = Color(0xFF06252B),
+        tertiary = Color(0xFF91A4FF), onTertiary = Color(0xFF111A43),
+        background = Color(0xFF090B10), surface = Color(0xFF11151C),
+        surfaceVariant = Color(0xFF1B2029), onBackground = Color(0xFFEDF0F7),
+        onSurface = Color(0xFFEDF0F7), onSurfaceVariant = Color(0xFFA5AFBF),
+        outline = Color(0xFF343D4D), error = Color(0xFFFF737C)
     )
 }
 

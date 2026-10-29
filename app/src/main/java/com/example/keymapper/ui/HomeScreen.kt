@@ -8,27 +8,34 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.ImageView
 import android.widget.Toast
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,6 +43,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -43,6 +51,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -57,17 +66,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.keymapper.data.AppSettings
-import com.example.keymapper.presentation.SettingsViewModel
 import com.example.keymapper.display.DisplayHelper
 import com.example.keymapper.injection.Activation
 import com.example.keymapper.injection.ActivationState
+import com.example.keymapper.presentation.SettingsViewModel
 import com.example.keymapper.service.MappingService
 import com.example.keymapper.util.Haptics
 import kotlinx.coroutines.Dispatchers
@@ -75,13 +85,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val Green = Color(0xFF4CAF50)
-private val Red = Color(0xFFF44336)
+private val StatusGreen = Color(0xFF55D6A4)
+private val StatusAmber = Color(0xFFF4BD66)
 
-/**
- * Painel inicial. O serviço pode ativar o mapeamento para qualquer aplicativo selecionado e compatível.
- * [onOpenSettings] recebe o índice da aba de configurações a abrir.
- */
+/** Painel de controle. Os indicadores refletem o serviço, a permissão de sobreposição e o estado real do Shizuku. */
 @Composable
 fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) -> Unit, onOpenEditor: () -> Unit) {
     val ctx = LocalContext.current
@@ -89,20 +96,22 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
     val scope = rememberCoroutineScope()
     val cfg by viewModel.settings.collectAsState()
     var refresh by remember { mutableIntStateOf(0) }
-    val key = tick + refresh
-    var state by remember { mutableStateOf(ActivationState.SHIZUKU_STOPPED) }
-    LaunchedEffect(key) { state = withContext(Dispatchers.IO) { Activation.state(ctx) } }
-    val overlayOk = remember(key) { Settings.canDrawOverlays(ctx) }
-    val running = remember(key) { MappingService.running }
-    val detecting = remember(key) { MappingService.detectionSupported }
-    val lastApp = remember(key) { MappingService.detectedPackage }
-    var showSheet by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val connected = state == ActivationState.READY
+    val statusKey = tick + refresh
+    var activationState by remember { mutableStateOf(ActivationState.SHIZUKU_STOPPED) }
+    LaunchedEffect(statusKey) {
+        activationState = withContext(Dispatchers.IO) { Activation.state(ctx) }
+    }
+    val overlayGranted = remember(statusKey) { Settings.canDrawOverlays(ctx) }
+    val serviceRunning = remember(statusKey) { MappingService.running }
+    val detectionSupported = remember(statusKey) { MappingService.detectionSupported }
+    val lastDetectedPackage = remember(statusKey) { MappingService.detectedPackage }
+    var showActivationSheet by remember { mutableStateOf(false) }
+    val activationSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val shizukuConnected = activationState == ActivationState.READY
 
     fun refreshLater() {
         scope.launch {
-            delay(700)
+            delay(650)
             refresh++
         }
     }
@@ -113,23 +122,24 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
             )
         } catch (_: Exception) {
-            Toast.makeText(ctx, "Abra Configurações do Android e permita 'Exibir sobre outros apps'.", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, "Abra as Configurações do Android e permita 'Exibir sobre outros apps'.", Toast.LENGTH_LONG).show()
         }
     }
 
     fun ensureService(): Boolean {
-        if (!overlayOk) {
-            Toast.makeText(ctx, "Permita a sobreposição de tela primeiro", Toast.LENGTH_LONG).show()
+        if (!overlayGranted) {
+            Toast.makeText(ctx, "Permita a sobreposição de tela primeiro.", Toast.LENGTH_LONG).show()
             openOverlaySettings()
             return false
         }
-        if (!connected) {
+        if (!shizukuConnected) {
             Toast.makeText(
-                ctx, "Shizuku desconectado: sem ele os toques não são injetados. Use \"Ativar via Wi-Fi\".",
+                ctx,
+                "Shizuku desconectado: o serviço pode abrir, mas a injeção de toques não ficará disponível até a autorização.",
                 Toast.LENGTH_LONG
             ).show()
         }
-        if (!running) {
+        if (!serviceRunning) {
             try {
                 ContextCompat.startForegroundService(ctx, Intent(ctx, MappingService::class.java))
             } catch (e: Exception) {
@@ -140,21 +150,52 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
         return true
     }
 
-    fun startGame(pkg: String) {
+    fun openTargetApp(pkg: String) {
         Haptics.tick(view)
         if (!ensureService()) return
-        val i = ctx.packageManager.getLaunchIntentForPackage(pkg)
-        if (i == null) {
-            Toast.makeText(ctx, "Esse app não está instalado ou não pode ser iniciado.", Toast.LENGTH_SHORT).show()
+        val launchIntent = ctx.packageManager.getLaunchIntentForPackage(pkg)
+        if (launchIntent == null) {
+            Toast.makeText(ctx, "Esse aplicativo não está instalado ou não possui uma tela de inicialização.", Toast.LENGTH_SHORT).show()
             return
         }
         try {
-            val id = DisplayHelper(ctx).target().displayId
-            val opts = ActivityOptions.makeBasic().setLaunchDisplayId(id)
-            ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts.toBundle())
+            val displayId = DisplayHelper(ctx).target().displayId
+            val launchOptions = ActivityOptions.makeBasic().setLaunchDisplayId(displayId)
+            ctx.startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), launchOptions.toBundle())
             refreshLater()
         } catch (e: Exception) {
-            Toast.makeText(ctx, "Falha ao abrir o jogo: ${e.localizedMessage ?: "verifique a tela selecionada"}", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, "Falha ao abrir o aplicativo: ${e.localizedMessage ?: "verifique a tela selecionada"}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun startServiceFromPanel() {
+        Haptics.tick(view)
+        if (ensureService()) refreshLater()
+    }
+
+    fun stopServiceFromPanel() {
+        Haptics.tick(view)
+        runCatching {
+            ctx.startService(Intent(ctx, MappingService::class.java).setAction(MappingService.ACTION_STOP))
+        }.onFailure {
+            Toast.makeText(ctx, "Não foi possível interromper o serviço.", Toast.LENGTH_SHORT).show()
+        }
+        refreshLater()
+    }
+
+    fun handlePermissions() {
+        Haptics.tick(view)
+        when {
+            !overlayGranted -> openOverlaySettings()
+            activationState == ActivationState.NEEDS_PERMISSION -> {
+                Activation.requestPermission()
+                refreshLater()
+            }
+            shizukuConnected -> Toast.makeText(ctx, "Permissões necessárias já concedidas.", Toast.LENGTH_SHORT).show()
+            else -> {
+                Toast.makeText(ctx, "Abra a ativação via Wi-Fi para iniciar o Shizuku.", Toast.LENGTH_LONG).show()
+                showActivationSheet = true
+            }
         }
     }
 
@@ -162,17 +203,25 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("KeyMapper", style = MaterialTheme.typography.titleLarge)
-                        Text("PAINEL DE CONTROLE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(11.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("K", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.titleLarge)
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text("KeyMapper", style = MaterialTheme.typography.titleLarge)
+                            Text("CONSOLE DE CONTROLE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 },
                 actions = {
-                    androidx.compose.material3.IconButton(onClick = {
-                        Haptics.tick(view)
-                        refresh++
-                    }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Atualizar status")
+                    IconButton(onClick = { Haptics.tick(view); refresh++ }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Atualizar status do serviço")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -181,340 +230,428 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
                 )
             )
         }
-    ) { pad ->
-        Column(
-            Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // ---- hero / visão geral ----
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) { padding ->
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val wideLayout = maxWidth >= 760.dp
+            Column(
+                Modifier.widthIn(max = 1180.dp).fillMaxWidth().align(Alignment.TopCenter)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = if (wideLayout) 20.dp else 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().background(
-                        Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
-                                MaterialTheme.colorScheme.surface,
-                                MaterialTheme.colorScheme.surface
-                            )
-                        )
-                    ).padding(18.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Surface(
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    if (connected && overlayOk) Icons.Filled.CheckCircle else Icons.Filled.Warning,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    if (connected && overlayOk) "PRONTO PARA CONFIGURAR" else "CONFIGURAÇÃO NECESSÁRIA",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        }
-                        Text("Pronto para jogar?", style = MaterialTheme.typography.headlineSmall)
-                        Text(
-                            "Gerencie o mapeamento, a mira e os recursos de entrada em um só lugar.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(
-                                onClick = { Haptics.tick(view); onOpenSettings(0) },
-                                modifier = Modifier.weight(1f).height(48.dp)
-                            ) {
-                                Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Text("  Configurar")
-                            }
-                            OutlinedButton(
-                                onClick = { Haptics.tick(view); showSheet = true },
-                                modifier = Modifier.weight(1f).height(48.dp)
-                            ) {
-                                Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Text("  Ativação")
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = { Haptics.tick(view); onOpenEditor() },
-                            modifier = Modifier.fillMaxWidth().height(46.dp)
-                        ) {
-                            Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Text("  Abrir editor de controles")
-                        }
-                    }
-                }
-            }
+                DashboardHero(
+                    serviceRunning = serviceRunning,
+                    shizukuConnected = shizukuConnected,
+                    overlayGranted = overlayGranted,
+                    onOpenEditor = { Haptics.tick(view); onOpenEditor() },
+                    onOpenSettings = { Haptics.tick(view); onOpenSettings(0) },
+                    onActivation = { Haptics.tick(view); showActivationSheet = true }
+                )
 
-            // ---- status ----
-            Card(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Estado do sistema", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceVariant) {
-                            Text(
-                                if (running) "ATIVO" else "INATIVO",
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelSmall
+                if (wideLayout) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            AppLaunchPanel(
+                                context = ctx,
+                                settings = cfg,
+                                onAutomaticChange = { enabled -> Haptics.tick(view); viewModel.update { it.copy(onlyInGame = enabled) } },
+                                onLaunch = ::openTargetApp,
+                                onChooseApps = { Haptics.tick(view); onOpenSettings(4) }
+                            )
+                            AccessPanel(
+                                overlayGranted = overlayGranted,
+                                activationState = activationState,
+                                shizukuConnected = shizukuConnected,
+                                onPermissions = ::handlePermissions,
+                                onActivation = { Haptics.tick(view); showActivationSheet = true }
                             )
                         }
-                    }
-                    StatusRow("Shizuku", connected, if (connected) "Conectado" else stateText(state))
-                    StatusRow("Sobreposição de tela", overlayOk, if (overlayOk) "Permitida" else "Não permitida")
-                    StatusRow("Serviço", running, if (running) "De prontidão" else "Desligado")
-                    if (cfg.onlyInGame) {
-                        StatusRow(
-                            "Detecção do app aberto", detecting,
-                            if (detecting) (lastApp ?: "ok") else "Aguardando / indisponível"
-                        )
-                    }
-                }
-            }
-
-            // ---- jogos: um botão para cada ----
-            Card(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Jogos e aplicativos selecionados", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (cfg.onlyInGame)
-                            "Automático: o mapeamento liga quando um app selecionado abre e desliga ao sair dele."
-                        else
-                            "Manual: o overlay fica ligado enquanto o serviço estiver de prontidão.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Switch(checked = cfg.onlyInGame, onCheckedChange = { v ->
-                            Haptics.tick(view)
-                            viewModel.update { it.copy(onlyInGame = v) }
-                        })
-                        Text("Ligar e desligar automaticamente", modifier = Modifier.weight(1f))
-                    }
-                    if (cfg.games.isEmpty()) {
-                        Text("Nenhum aplicativo selecionado.", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    cfg.games.forEach { pkg ->
-                        val label = appLabel(ctx, pkg)
-                        Button(
-                            onClick = { startGame(pkg) },
-                            enabled = label != null,
-                            modifier = Modifier.fillMaxWidth().height(50.dp)
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(26.dp))
-                            Text(
-                                "  Abrir " + (label ?: "$pkg (não instalado)"),
-                                style = MaterialTheme.typography.titleMedium
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            SystemStatusPanel(
+                                serviceRunning = serviceRunning,
+                                shizukuConnected = shizukuConnected,
+                                overlayGranted = overlayGranted,
+                                activationState = activationState,
+                                automaticDetection = cfg.onlyInGame,
+                                detectionSupported = detectionSupported,
+                                lastDetectedPackage = lastDetectedPackage,
+                                onStart = ::startServiceFromPanel,
+                                onStop = ::stopServiceFromPanel
                             )
+                            QuickSettingsPanel(onOpenSettings = { Haptics.tick(view); onOpenSettings(0) }, onOpenApps = { Haptics.tick(view); onOpenSettings(4) })
                         }
                     }
-                    OutlinedButton(
-                        onClick = {
-                            Haptics.tick(view)
-                            onOpenSettings(4) // aba Jogos
-                        },
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) { Text("Escolher jogos e apps") }
-                    if (running) {
-                        Button(
-                            onClick = {
-                                Haptics.tick(view)
-                                ctx.startService(
-                                    Intent(ctx, MappingService::class.java).setAction(MappingService.ACTION_STOP)
-                                )
-                                refreshLater()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Red),
-                            modifier = Modifier.fillMaxWidth().height(48.dp)
-                        ) { Text("Parar serviço") }
-                    }
-                }
-            }
-
-            // ---- permissões ----
-            Card(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Permissões", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "O app precisa de Sobreposição (HUD sobre o jogo) e da permissão do Shizuku (injetar os toques). " +
-                            "Não usa Acessibilidade.",
-                        style = MaterialTheme.typography.bodyMedium
+                } else {
+                    SystemStatusPanel(
+                        serviceRunning = serviceRunning,
+                        shizukuConnected = shizukuConnected,
+                        overlayGranted = overlayGranted,
+                        activationState = activationState,
+                        automaticDetection = cfg.onlyInGame,
+                        detectionSupported = detectionSupported,
+                        lastDetectedPackage = lastDetectedPackage,
+                        onStart = ::startServiceFromPanel,
+                        onStop = ::stopServiceFromPanel
                     )
-                    StatusRow("Sobreposição", overlayOk, if (overlayOk) "Concedida" else "Pendente")
-                    StatusRow(
-                        "Permissão do Shizuku", connected,
-                        if (connected) "Concedida" else if (state == ActivationState.NEEDS_PERMISSION) "Pendente" else "Shizuku desconectado"
+                    AppLaunchPanel(
+                        context = ctx,
+                        settings = cfg,
+                        onAutomaticChange = { enabled -> Haptics.tick(view); viewModel.update { it.copy(onlyInGame = enabled) } },
+                        onLaunch = ::openTargetApp,
+                        onChooseApps = { Haptics.tick(view); onOpenSettings(4) }
                     )
-                    OutlinedButton(
-                        onClick = {
-                            Haptics.tick(view)
-                            when {
-                                !overlayOk -> openOverlaySettings()
-                                state == ActivationState.NEEDS_PERMISSION -> {
-                                    Activation.requestPermission()
-                                    refreshLater()
-                                }
-                                connected -> Toast.makeText(ctx, "Tudo concedido", Toast.LENGTH_SHORT).show()
-                                else -> Toast.makeText(ctx, "Ative o Shizuku primeiro (botão abaixo)", Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Icon(Icons.Filled.Lock, contentDescription = null)
-                        Text("  Conceder Permissões")
-                    }
-                }
-            }
-
-            // ---- Wi-Fi ----
-            Card(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Ativação sem computador", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "No Android 11 ou superior dá para ativar o Shizuku pela depuração sem fio (Wi-Fi), sem PC. " +
-                            "Precisa refazer depois de reiniciar o celular.",
-                        style = MaterialTheme.typography.bodyMedium
+                    AccessPanel(
+                        overlayGranted = overlayGranted,
+                        activationState = activationState,
+                        shizukuConnected = shizukuConnected,
+                        onPermissions = ::handlePermissions,
+                        onActivation = { Haptics.tick(view); showActivationSheet = true }
                     )
-                    OutlinedButton(
-                        onClick = {
-                            Haptics.tick(view)
-                            showSheet = true
-                        },
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        Icon(Icons.Filled.Build, contentDescription = null)
-                        Text("  Ativar via Wi-Fi (Shizuku)")
-                    }
+                    QuickSettingsPanel(onOpenSettings = { Haptics.tick(view); onOpenSettings(0) }, onOpenApps = { Haptics.tick(view); onOpenSettings(4) })
                 }
-            }
-
-            // ---- configurações ----
-            OutlinedButton(
-                onClick = {
-                    Haptics.tick(view)
-                    onOpenSettings(0)
-                },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Filled.Settings, contentDescription = null)
-                Text("  Todas as configurações", style = MaterialTheme.typography.titleMedium)
             }
         }
     }
 
-    if (showSheet) {
-        ModalBottomSheet(onDismissRequest = { showSheet = false }, sheetState = sheetState) {
+    if (showActivationSheet) {
+        ModalBottomSheet(onDismissRequest = { showActivationSheet = false }, sheetState = activationSheetState) {
             Column(
-                Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState()),
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text("Ativar via Wi-Fi (depuração sem fio)", style = MaterialTheme.typography.titleLarge)
-                Surface(
-                    color = (if (connected) Green else Red).copy(alpha = 0.18f),
-                    shape = RoundedCornerShape(50)
-                ) {
-                    Text(
-                        if (connected) "Shizuku: Conectado" else "Shizuku: Desconectado (${stateText(state)})",
-                        color = if (connected) Green else Red,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                    )
+                Text("Ativação via Wi-Fi", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    "O KeyMapper usa o Shizuku para os recursos privilegiados. A ativação do Shizuku pode precisar ser repetida após reiniciar o celular.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                StatusPill(
+                    text = if (shizukuConnected) "Shizuku conectado" else "Shizuku ${activationStateLabel(activationState).lowercase()}",
+                    ready = shizukuConnected
+                )
+                SetupStep(1, "Instale e abra o Shizuku", "Instale o Shizuku pela fonte oficial e abra o aplicativo ao menos uma vez.")
+                SetupStep(2, "Ative as opções do desenvolvedor", "Em Configurações › Sobre o telefone › Informações do software, toque sete vezes em Número da versão.")
+                SetupStep(3, "Ative a depuração sem fio", "Nas Opções do desenvolvedor, ative Depuração sem fio e escolha parear com código.")
+                SetupStep(4, "Conclua o pareamento no Shizuku", "Use o código de pareamento solicitado pelo próprio Shizuku e toque em Iniciar.")
+                SetupStep(5, "Volte ao KeyMapper", "Atualize o status. O estado conectado será exibido quando o serviço estiver disponível.")
+                Button(onClick = { openDeveloperSettings(ctx) }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Text("Abrir opções do desenvolvedor")
                 }
-                Step(1, "Instale o Shizuku", "Pela Play Store ou GitHub, e abra o app uma vez.")
-                Step(
-                    2, "Libere as Opções do desenvolvedor",
-                    "Configurações › Sobre o telefone › Informações do software › toque 7 vezes em \"Número da versão\"."
-                )
-                Step(
-                    3, "Ligue a Depuração sem fio",
-                    "Conecte ao Wi-Fi. Em Opções do desenvolvedor, ative \"Depuração sem fio\" e toque em " +
-                        "\"Parear dispositivo com código de pareamento\". Aparece um código de 6 dígitos."
-                )
-                Step(
-                    4, "Digite o código no Shizuku",
-                    "Abra o Shizuku, escolha o pareamento por depuração sem fio e, quando a notificação aparecer, " +
-                        "toque nela e digite o código de 6 dígitos. Depois toque em Iniciar."
-                )
-                Step(5, "Volte ao KeyMapper", "O status fica verde (Conectado). Toque em Atualizar status.")
-
-                Button(
-                    onClick = { openDeveloperSettings(ctx) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) { Text("Abrir Opções do desenvolvedor") }
                 OutlinedButton(
                     onClick = {
-                        val i = ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-                        if (i != null) ctx.startActivity(i)
-                        else Toast.makeText(ctx, "Shizuku não instalado", Toast.LENGTH_SHORT).show()
+                        val intent = ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                        if (intent != null) ctx.startActivity(intent)
+                        else Toast.makeText(ctx, "Shizuku não está instalado.", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) { Text("Abrir Shizuku") }
-                OutlinedButton(
-                    onClick = {
-                        Haptics.tick(view)
-                        refresh++
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
+                OutlinedButton(onClick = { refresh++; }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                     Icon(Icons.Filled.Refresh, contentDescription = null)
                     Text("  Atualizar status")
                 }
                 OutlinedButton(
                     onClick = {
-                        Haptics.tick(view)
                         Thread {
-                            val ok = Activation.startShizukuViaRoot()
+                            val success = Activation.startShizukuViaRoot()
                             android.os.Handler(ctx.mainLooper).post {
-                                Toast.makeText(
-                                    ctx, if (ok) "Shizuku iniciado via root" else "Root indisponível", Toast.LENGTH_SHORT
-                                ).show()
+                                Toast.makeText(ctx, if (success) "Shizuku iniciado via root." else "Root indisponível.", Toast.LENGTH_SHORT).show()
                                 refresh++
                             }
                         }.start()
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) { Text("Ativar via root (se o aparelho tiver root)") }
+                ) { Text("Tentar ativação via root") }
             }
         }
     }
 }
 
-/** Nome do app instalado, ou null se não estiver instalado (QUERY_ALL_PACKAGES permite ver todos). */
-private fun appLabel(ctx: Context, pkg: String): String? = try {
-    val pm = ctx.packageManager
-    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-} catch (e: Exception) {
-    null
+@Composable
+private fun DashboardHero(
+    serviceRunning: Boolean,
+    shizukuConnected: Boolean,
+    overlayGranted: Boolean,
+    onOpenEditor: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onActivation: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+    ) {
+        Column(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f)).padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(8.dp)) {}
+                Text("ESPAÇO DE TRABALHO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                StatusPill(
+                    text = when {
+                        serviceRunning && shizukuConnected && overlayGranted -> "Tudo pronto"
+                        serviceRunning -> "Serviço ativo"
+                        else -> "Configuração"
+                    },
+                    ready = serviceRunning && shizukuConnected && overlayGranted
+                )
+            }
+            Text("Mapeamento de entrada", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "Organize teclas, mouse e controles por aplicativo. O editor usa uma área de referência; não é uma captura ao vivo do jogo.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onOpenEditor, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("  Abrir editor", maxLines = 1)
+                }
+                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("  Configurar", maxLines = 1)
+                }
+            }
+            TextButton(onClick = onActivation, modifier = Modifier.align(Alignment.Start)) {
+                Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(17.dp))
+                Text("  Ativação e permissões")
+            }
+        }
+    }
 }
 
-private fun stateText(s: ActivationState) = when (s) {
+@Composable
+private fun SystemStatusPanel(
+    serviceRunning: Boolean,
+    shizukuConnected: Boolean,
+    overlayGranted: Boolean,
+    activationState: ActivationState,
+    automaticDetection: Boolean,
+    detectionSupported: Boolean,
+    lastDetectedPackage: String?,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Estado do sistema", style = MaterialTheme.typography.titleMedium)
+                    Text("Informações detectadas neste dispositivo", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                StatusPill(text = if (serviceRunning) "Ativo" else "Parado", ready = serviceRunning)
+            }
+            androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+            StatusRow("Shizuku", shizukuConnected, if (shizukuConnected) "Conectado" else activationStateLabel(activationState))
+            StatusRow("Sobreposição", overlayGranted, if (overlayGranted) "Permitida" else "Pendente")
+            StatusRow("Serviço de mapeamento", serviceRunning, if (serviceRunning) "Em execução" else "Interrompido")
+            if (automaticDetection) {
+                StatusRow("Detecção de aplicativo", detectionSupported, if (detectionSupported) lastDetectedPackage ?: "Disponível" else "Aguardando serviço")
+            }
+            if (serviceRunning) {
+                OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("  Interromper serviço")
+                }
+            } else {
+                Button(onClick = onStart, modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("  Iniciar serviço")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppLaunchPanel(
+    context: Context,
+    settings: AppSettings,
+    onAutomaticChange: (Boolean) -> Unit,
+    onLaunch: (String) -> Unit,
+    onChooseApps: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Aplicativos e perfis", style = MaterialTheme.typography.titleMedium)
+                    Text("${settings.games.size} selecionado(s)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onChooseApps) { Text("Gerenciar") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Ativação automática", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (settings.onlyInGame) "Detecta os apps selecionados em primeiro plano." else "O serviço fica sob controle manual.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = settings.onlyInGame, onCheckedChange = onAutomaticChange)
+            }
+            androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+            if (settings.games.isEmpty()) {
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Nenhum aplicativo selecionado", style = MaterialTheme.typography.titleSmall)
+                        Text("Escolha jogos ou aplicativos para associar à ativação automática.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(onClick = onChooseApps, modifier = Modifier.fillMaxWidth()) { Text("Selecionar aplicativos") }
+                    }
+                }
+            } else {
+                settings.games.forEach { packageName ->
+                    val label = appLabel(context, packageName)
+                    val appIcon = remember(packageName) {
+                        runCatching { context.packageManager.getApplicationIcon(packageName) }.getOrNull()
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (appIcon != null) {
+                            AndroidView(
+                                factory = { view -> ImageView(view).apply { scaleType = ImageView.ScaleType.FIT_CENTER } },
+                                update = { imageView ->
+                                    imageView.setImageDrawable(appIcon)
+                                    imageView.contentDescription = "Ícone de ${label ?: packageName}"
+                                },
+                                modifier = Modifier.size(42.dp)
+                            )
+                        } else {
+                            Surface(
+                                modifier = Modifier.size(42.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        (label ?: packageName.substringAfterLast('.')).firstOrNull()?.uppercase() ?: "A",
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                }
+                            }
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(label ?: packageName.substringAfterLast('.'), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val profileLabel = if (settings.profiles.containsKey(packageName)) "Perfil personalizado" else "Perfil padrão"
+                            Text(
+                                if (label == null) "Não instalado ou não visível" else "$profileLabel · $packageName",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (label == null) StatusAmber else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        androidx.compose.material3.IconButton(onClick = { onLaunch(packageName) }, enabled = label != null) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = "Abrir ${label ?: packageName}", tint = if (label != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                OutlinedButton(onClick = onChooseApps, modifier = Modifier.fillMaxWidth().height(44.dp)) {
+                    Text("Editar lista de aplicativos")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccessPanel(
+    overlayGranted: Boolean,
+    activationState: ActivationState,
+    shizukuConnected: Boolean,
+    onPermissions: () -> Unit,
+    onActivation: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Acesso e permissões", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "A sobreposição exibe o HUD; o Shizuku fornece a integração privilegiada usada para injetar eventos. Nenhum estado é presumido como concedido.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            StatusRow("Sobreposição de tela", overlayGranted, if (overlayGranted) "Concedida" else "Pendente")
+            StatusRow(
+                "Permissão Shizuku",
+                shizukuConnected,
+                if (shizukuConnected) "Conectado" else when (activationState) {
+                    ActivationState.NEEDS_PERMISSION -> "Pendente"
+                    else -> activationStateLabel(activationState)
+                }
+            )
+            Button(onClick = onPermissions, modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("  Verificar permissões")
+            }
+            OutlinedButton(onClick = onActivation, modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("  Configurar ativação via Wi-Fi")
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickSettingsPanel(onOpenSettings: () -> Unit, onOpenApps: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Acesso rápido", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("  Mouse, mira e sistema")
+            }
+            OutlinedButton(onClick = onOpenApps, modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                Icon(Icons.Filled.Home, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("  Gerenciar aplicativos")
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(text: String, ready: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = (if (ready) StatusGreen else StatusAmber).copy(alpha = 0.14f)
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (ready) StatusGreen else StatusAmber,
+            maxLines = 1
+        )
+    }
+}
+
+private fun activationStateLabel(state: ActivationState): String = when (state) {
     ActivationState.READY -> "Conectado"
     ActivationState.NEEDS_PERMISSION -> "Sem permissão"
     ActivationState.SHIZUKU_STOPPED -> "Parado"
@@ -522,45 +659,56 @@ private fun stateText(s: ActivationState) = when (s) {
 }
 
 @Composable
-private fun StatusRow(label: String, ok: Boolean, text: String) {
+private fun StatusRow(label: String, ok: Boolean, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(
-            if (ok) Icons.Filled.CheckCircle else Icons.Filled.Warning,
-            contentDescription = null,
-            tint = if (ok) Green else Red,
-            modifier = Modifier.size(22.dp)
+            imageVector = if (ok) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+            contentDescription = if (ok) "OK" else "Atenção",
+            tint = if (ok) StatusGreen else StatusAmber,
+            modifier = Modifier.size(20.dp)
         )
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
-        }
-        Text(text, color = if (ok) Green else Red, style = MaterialTheme.typography.labelLarge)
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(
+            value,
+            color = if (ok) StatusGreen else StatusAmber,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
 @Composable
-private fun Step(n: Int, title: String, body: String) {
+private fun SetupStep(number: Int, title: String, body: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp)) {
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(30.dp)) {
             Box(contentAlignment = Alignment.Center) {
-                Text("$n", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelLarge)
+                Text("$number", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.labelLarge)
             }
         }
-        Column {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(body, style = MaterialTheme.typography.bodyMedium)
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** Nome exibido pelo Android; null identifica app ausente ou não visível para este processo. */
+private fun appLabel(ctx: Context, pkg: String): String? = try {
+    val pm = ctx.packageManager
+    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+} catch (_: Exception) {
+    null
 }
 
 private fun openDeveloperSettings(ctx: Context) {
     try {
         ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-    } catch (e: ActivityNotFoundException) {
-        // Opções do desenvolvedor ainda desativadas: abre "Sobre o telefone" para tocar 7x no número da versão
+    } catch (_: ActivityNotFoundException) {
         try {
             ctx.startActivity(Intent(Settings.ACTION_DEVICE_INFO_SETTINGS))
-        } catch (e2: Exception) {
-            Toast.makeText(ctx, "Abra Configurações › Sobre o telefone manualmente", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {
+            Toast.makeText(ctx, "Abra Configurações › Sobre o telefone manualmente.", Toast.LENGTH_LONG).show()
         }
     }
 }

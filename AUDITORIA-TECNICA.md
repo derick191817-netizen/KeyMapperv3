@@ -108,3 +108,41 @@ A v7.7 melhora a qualidade de CI adicionando testes unitários e verificações 
 A versão v7.8 altera o workflow para resolver o problema do Wrapper ausente sem inventar um `gradle-wrapper.jar`: instala Gradle 8.8 pela action oficial, executa `gradle wrapper --gradle-version 8.8 --distribution-type bin`, verifica a presença de `gradlew`, `gradlew.bat`, `gradle-wrapper.jar` e `gradle-wrapper.properties`, confere que a distribuição declarada é Gradle 8.8 e executa `./gradlew --version`. As tarefas `:app:tasks`, `:app:compileDebugKotlin`, `:app:testDebugUnitTest` e `:app:assembleDebug` passam a usar `./gradlew`. O workflow publica também um artefato separado `keymapper-gradle-wrapper` com os arquivos oficiais gerados.
 
 **Limitação importante:** os arquivos do Wrapper são gerados no runner do GitHub Actions, não incorporados como binários neste ZIP, porque o ambiente de criação não tem acesso à rede para obter e validar a distribuição/JAR oficial. O bootstrap do Wrapper e a compilação ainda precisam ser confirmados executando o workflow real. Nenhuma compilação Android foi alegada nesta sessão.
+
+
+## Atualização v7.9 — redesign responsivo da interface mobile (app 0.8.0)
+
+### Escopo implementado
+
+- `MainActivity.kt`: navegação inferior compartilhada para Painel, Editor e Ajustes; paleta padrão grafite com violeta e ciano. Paletas alternativas já oferecidas pelo app continuam disponíveis.
+- `HomeScreen.kt`: painel adaptável; status vindos de `Activation`, `Settings.canDrawOverlays` e `MappingService`; ações ligadas ao serviço e às permissões existentes; lista dos apps selecionados com ícone instalado quando disponível e identificação do perfil padrão/personalizado.
+- `MappingEditorScreen.kt`: ações e sliders adaptados para largura estreita; propriedades do marcador em folha inferior no modo móvel; mantém `HudButton`, edição de coordenadas e salvamento por `SettingsViewModel.saveProfile`.
+- `AndroidManifest.xml`, `res/drawable/ic_keymapper_launcher.xml`: ícone vetorial próprio do KeyMapper.
+- `app/build.gradle.kts`: `versionCode = 8`, `versionName = 0.8.0`.
+- Gradle Wrapper oficial 8.8 adicionado à raiz com os scripts Linux/Windows, JAR oficial gerado pelo runner que compilou a v7.8 e `gradle-wrapper.properties` com checksum SHA-256 da distribuição oficial Gradle 8.8. A origem do checksum é a referência oficial: https://gradle.org/release-checksums/.
+- Workflow alterado para validar e usar o Wrapper versionado, sem gerar outro Wrapper a cada build.
+
+### Funcionalidades preservadas por leitura do código
+
+- Ativação, autorização e consulta do Shizuku continuam usando a classe `Activation`.
+- Serviço continua usando `MappingService`; as ações Start/Stop chamam os caminhos existentes.
+- Aplicativos e preferências continuam usando `AppSettings` e `SettingsViewModel`; a pesquisa e a seleção de apps existentes em `AppsTab` foram preservadas.
+- Editor mantém a estrutura `HudButton`/`AppProfile`, a lógica de desfazer/refazer existente e grava os perfis por `saveProfile`.
+- Nenhum arquivo de persistência foi migrado, resetado ou removido deliberadamente nesta mudança.
+- O ícone não usa marca/logotipo de terceiro.
+
+### Validação desta atualização
+
+- ZIP anterior v7.8: artefato `keymapper-gradle-wrapper` obtido da execução bem-sucedida do GitHub Actions (run 40893453745, commit `1460787f19388ab4ed61b67c84781d2ac4eecf06`). O conteúdo interno foi verificado e contém `gradlew`, `gradlew.bat`, `gradle-wrapper.jar` e `gradle-wrapper.properties`.
+- Para esta v7.9, executar novamente no GitHub Actions `:app:compileDebugKotlin`, `:app:testDebugUnitTest` e `:app:assembleDebug`. O sucesso da v7.8 não é uma prova de compilação da nova UI.
+- O container local não possui Android SDK/Gradle instalados; a compilação Android completa e o teste em dispositivo não foram executados localmente.
+- Integração de escrita do GitHub negou a criação de branch com HTTP 403 (`Resource not accessible by integration`). Por isso esta atualização é entregue como ZIP e ainda não foi gravada no branch remoto `main`.
+
+### Referências
+
+- Gradle Wrapper: https://docs.gradle.org/current/userguide/gradle_wrapper.html
+- Checksums oficiais de Gradle e Wrapper: https://gradle.org/release-checksums/
+- Compose adaptável: https://developer.android.com/develop/ui/compose/layouts/adaptive
+- Shizuku API: https://github.com/RikkaApps/Shizuku-API
+
+**Classificação da versão 0.8.0:** pronta para tentativa de build no GitHub Actions, mas ainda não comprovada por um build desta revisão. Testes de runtime do overlay e Shizuku continuam pendentes.

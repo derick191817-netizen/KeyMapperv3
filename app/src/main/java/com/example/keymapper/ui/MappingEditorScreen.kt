@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,17 +30,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -89,6 +93,8 @@ fun MappingEditorScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
     var selectedId by remember { mutableStateOf<Int?>(draftButtons.firstOrNull()?.id) }
     var activeTool by remember { mutableStateOf<EditorTool?>(null) }
     var showGrid by remember { mutableStateOf(true) }
+    var showMobileProperties by remember { mutableStateOf(false) }
+    val propertiesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var editorZoom by remember(selectedPackage) { mutableStateOf(1f) }
     var editorPanX by remember(selectedPackage) { mutableStateOf(0f) }
     var editorPanY by remember(selectedPackage) { mutableStateOf(0f) }
@@ -182,23 +188,46 @@ fun MappingEditorScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                     Text(if (dirty) "Não salvo" else "Salvo", Modifier.padding(horizontal = 9.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall)
                 }
             }
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                OutlinedButton(onClick = { undo() }, enabled = undoStack.isNotEmpty()) { Text("↶ Desfazer") }
-                OutlinedButton(onClick = { redo() }, enabled = redoStack.isNotEmpty()) { Text("↷ Refazer") }
-                TextButton(onClick = {
-                    draftButtons = savedSnapshot
-                    profileSensX = savedSensX; profileSensY = savedSensY; profileGlobalSens = savedGlobalSens
-                    selectedId = savedSnapshot.firstOrNull()?.id; activeTool = null
-                    undoStack.clear(); redoStack.clear(); dragOrigin = null
-                }, enabled = dirty) { Text("Cancelar alterações") }
-                OutlinedButton(onClick = { saveDraft() }, enabled = dirty) {
-                    Text("Salvar")
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                if (maxWidth < 440.dp) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(onClick = { undo() }, enabled = undoStack.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("↶ Desfazer") }
+                            OutlinedButton(onClick = { redo() }, enabled = redoStack.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("↷ Refazer") }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton(
+                                onClick = {
+                                    draftButtons = savedSnapshot
+                                    profileSensX = savedSensX; profileSensY = savedSensY; profileGlobalSens = savedGlobalSens
+                                    selectedId = savedSnapshot.firstOrNull()?.id; activeTool = null
+                                    undoStack.clear(); redoStack.clear(); dragOrigin = null
+                                },
+                                enabled = dirty,
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Cancelar") }
+                            OutlinedButton(onClick = { saveDraft() }, enabled = dirty, modifier = Modifier.weight(1f)) { Text("Salvar") }
+                            Button(onClick = { if (dirty) saveDraft(); onBack() }, modifier = Modifier.weight(1f)) { Text("Concluir") }
+                        }
+                    }
+                } else {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedButton(onClick = { undo() }, enabled = undoStack.isNotEmpty()) { Text("↶ Desfazer") }
+                        OutlinedButton(onClick = { redo() }, enabled = redoStack.isNotEmpty()) { Text("↷ Refazer") }
+                        TextButton(onClick = {
+                            draftButtons = savedSnapshot
+                            profileSensX = savedSensX; profileSensY = savedSensY; profileGlobalSens = savedGlobalSens
+                            selectedId = savedSnapshot.firstOrNull()?.id; activeTool = null
+                            undoStack.clear(); redoStack.clear(); dragOrigin = null
+                        }, enabled = dirty) { Text("Cancelar alterações") }
+                        OutlinedButton(onClick = { saveDraft() }, enabled = dirty) { Text("Salvar") }
+                        Button(onClick = { if (dirty) saveDraft(); onBack() }) { Text("Concluir") }
+                    }
                 }
-                Button(onClick = { if (dirty) saveDraft(); onBack() }) { Text("Concluir") }
             }
         }
 
@@ -227,18 +256,38 @@ fun MappingEditorScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
         ) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Sensibilidade do perfil · $selectedPackage", style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Column(Modifier.width(150.dp)) {
-                        Text("X: ${"%.2f".format(profileSensX)}", style = MaterialTheme.typography.labelSmall)
-                        Slider(value = (((log10(profileSensX.toDouble()) + 1.0) / 4.0).toFloat()).coerceIn(0f, 1f), onValueChange = { profileSensX = 10f.pow(it * 4f - 1f) }, valueRange = 0f..1f)
-                    }
-                    Column(Modifier.width(150.dp)) {
-                        Text("Y: ${"%.2f".format(profileSensY)}", style = MaterialTheme.typography.labelSmall)
-                        Slider(value = (((log10(profileSensY.toDouble()) + 1.0) / 4.0).toFloat()).coerceIn(0f, 1f), onValueChange = { profileSensY = 10f.pow(it * 4f - 1f) }, valueRange = 0f..1f)
-                    }
-                    Column(Modifier.width(150.dp)) {
-                        Text("Geral: ${"%.2f".format(profileGlobalSens)}", style = MaterialTheme.typography.labelSmall)
-                        Slider(value = profileGlobalSens, onValueChange = { profileGlobalSens = it }, valueRange = 0.1f..10f)
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val compactControls = maxWidth < 440.dp
+                    if (compactControls) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text("Horizontal X: ${"%.2f".format(profileSensX)}", style = MaterialTheme.typography.labelSmall)
+                                Slider(value = (((log10(profileSensX.toDouble()) + 1.0) / 4.0).toFloat()).coerceIn(0f, 1f), onValueChange = { profileSensX = 10f.pow(it * 4f - 1f) }, valueRange = 0f..1f)
+                            }
+                            Column(Modifier.fillMaxWidth()) {
+                                Text("Vertical Y: ${"%.2f".format(profileSensY)}", style = MaterialTheme.typography.labelSmall)
+                                Slider(value = (((log10(profileSensY.toDouble()) + 1.0) / 4.0).toFloat()).coerceIn(0f, 1f), onValueChange = { profileSensY = 10f.pow(it * 4f - 1f) }, valueRange = 0f..1f)
+                            }
+                            Column(Modifier.fillMaxWidth()) {
+                                Text("Geral: ${"%.2f".format(profileGlobalSens)}", style = MaterialTheme.typography.labelSmall)
+                                Slider(value = profileGlobalSens, onValueChange = { profileGlobalSens = it }, valueRange = 0.1f..10f)
+                            }
+                        }
+                    } else {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Horizontal X: ${"%.2f".format(profileSensX)}", style = MaterialTheme.typography.labelSmall)
+                                Slider(value = (((log10(profileSensX.toDouble()) + 1.0) / 4.0).toFloat()).coerceIn(0f, 1f), onValueChange = { profileSensX = 10f.pow(it * 4f - 1f) }, valueRange = 0f..1f)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text("Vertical Y: ${"%.2f".format(profileSensY)}", style = MaterialTheme.typography.labelSmall)
+                                Slider(value = (((log10(profileSensY.toDouble()) + 1.0) / 4.0).toFloat()).coerceIn(0f, 1f), onValueChange = { profileSensY = 10f.pow(it * 4f - 1f) }, valueRange = 0f..1f)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text("Geral: ${"%.2f".format(profileGlobalSens)}", style = MaterialTheme.typography.labelSmall)
+                                Slider(value = profileGlobalSens, onValueChange = { profileGlobalSens = it }, valueRange = 0.1f..10f)
+                            }
+                        }
                     }
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -299,7 +348,7 @@ fun MappingEditorScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                     EditorCanvas(
                         modifier = Modifier.fillMaxWidth(), buttons = draftButtons, selectedId = selectedId,
                         activeTool = activeTool, showGrid = showGrid, accent = accent, zoom = editorZoom, panX = editorPanX, panY = editorPanY,
-                        onSelect = { selectedId = it }, onAdd = { kind, x, y -> addButton(kind, x, y) },
+                        onSelect = { selectedId = it }, onAdd = { kind, x, y -> addButton(kind, x, y); showMobileProperties = true },
                         onMove = { id, x, y -> replaceDraft(draftButtons.map { if (it.id == id) it.copy(x = x, y = y) else it }, record = false) },
                         onResize = { id, size -> replaceDraft(draftButtons.map { if (it.id == id) it.copy(size = size.coerceIn(0.035f, 0.15f)) else it }, record = false) },
                         onMoveStart = { beginMove() }, onMoveEnd = { finishMove() }
@@ -309,14 +358,49 @@ fun MappingEditorScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                         Spacer(Modifier.weight(1f))
                         FilterChip(selected = showGrid, onClick = { showGrid = !showGrid }, label = { Text("Grade") })
                     }
-                    PropertiesPanel(
-                        modifier = Modifier.fillMaxWidth(), selected = selected,
-                        onUpdate = { id, transform -> updateButton(id, transform) },
-                        onDelete = { id -> replaceDraft(draftButtons.filterNot { it.id == id }); selectedId = draftButtons.firstOrNull()?.id },
-                        onReset = { id -> savedSnapshot.firstOrNull { it.id == id }?.let { original -> updateButton(id) { original } } }
-                    )
+                    if (selected != null) {
+                        OutlinedButton(
+                            onClick = { showMobileProperties = true },
+                            modifier = Modifier.fillMaxWidth().height(46.dp)
+                        ) {
+                            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Text("  Editar propriedades de ${selected.name}", maxLines = 1)
+                        }
+                    } else {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Text(
+                                "Toque em um marcador para selecioná-lo e abrir suas propriedades.",
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    if (showMobileProperties) {
+        ModalBottomSheet(
+            onDismissRequest = { showMobileProperties = false },
+            sheetState = propertiesSheetState
+        ) {
+            PropertiesPanel(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp).padding(horizontal = 12.dp),
+                selected = selected,
+                onUpdate = { id, transform -> updateButton(id, transform) },
+                onDelete = { id ->
+                    replaceDraft(draftButtons.filterNot { it.id == id })
+                    selectedId = draftButtons.firstOrNull { it.id != id }?.id
+                    showMobileProperties = false
+                },
+                onReset = { id -> savedSnapshot.firstOrNull { it.id == id }?.let { original -> updateButton(id) { original } } }
+            )
         }
     }
 }
