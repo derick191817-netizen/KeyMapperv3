@@ -29,7 +29,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -197,7 +196,7 @@ fun MappingEditorScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                     undoStack.clear(); redoStack.clear(); dragOrigin = null
                 }, enabled = dirty) { Text("Cancelar alterações") }
                 OutlinedButton(onClick = { saveDraft() }, enabled = dirty) {
-                    Icon(Icons.Filled.Save, contentDescription = null); Text(" Salvar")
+                    Text("Salvar")
                 }
                 Button(onClick = { if (dirty) saveDraft(); onBack() }) { Text("Concluir") }
             }

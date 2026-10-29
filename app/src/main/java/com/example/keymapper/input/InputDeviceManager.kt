@@ -42,9 +42,13 @@ object InputDeviceManager {
         return describe(device)
     }
 
-    fun snapshot(): Snapshot = Snapshot(InputDevice.getDeviceIds().mapNotNull { id ->
-        InputDevice.getDevice(id)?.let(::describe)
-    }.sortedWith(compareBy<DeviceInfo> { !it.mouse }.thenBy { !it.keyboard }.thenBy { it.name }))
+    fun snapshot(): Snapshot = Snapshot(
+        InputDevice.getDeviceIds()
+            .asSequence()
+            .mapNotNull { id -> InputDevice.getDevice(id)?.let(::describe) }
+            .sortedWith(compareBy<DeviceInfo> { !it.mouse }.thenBy { !it.keyboard }.thenBy { it.name })
+            .toList()
+    )
 
     /** Observa conexão/desconexão. O chamador deve chamar close() no ciclo de vida adequado. */
     fun observe(context: Context, onChanged: (Snapshot) -> Unit): AutoCloseable {

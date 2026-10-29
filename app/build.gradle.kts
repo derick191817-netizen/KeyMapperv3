@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.keymapper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "5.7"
+        versionCode = 9
+        versionName = "5.9"
     }
 
     compileOptions {
