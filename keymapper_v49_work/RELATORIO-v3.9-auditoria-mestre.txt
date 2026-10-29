@@ -1,0 +1,52 @@
+KEYMAPPER v3.9 — AUDITORIA E HARDENING DO PROMPT MESTRE
+Data: 2026-10-29
+Base: v3.8-redesign-visual
+
+RESUMO
+Esta versão é uma etapa incremental de auditoria/hardening. Não declara o produto final concluído.
+
+ALTERAÇÕES
+1. MappingEngine.kt
+   - A seleção automática do modo de rotação específico agora reconhece apenas Free Fire e Free Fire MAX.
+   - Removidos pacotes de PUBG e Call of Duty da lista de jogos com comportamento especial.
+2. SettingsScreen.kt
+   - A tela de ativação não permite mais escolher qualquer aplicativo, informar pacote arbitrário ou abrir o seletor geral de apps.
+   - A configuração fica restrita aos pacotes com os nomes oficiais do Free Fire e Free Fire MAX.
+   - Cada opção informa se o pacote está instalado e não permite selecioná-lo quando não está instalado.
+3. AppSettings.kt
+   - A leitura das configurações valida faixas de sensibilidade X/Y e global.
+   - Na leitura JSON, diversos valores numéricos são limitados a faixas seguras e valores não finitos voltam ao padrão.
+   - A lista persistida de pacotes é filtrada para os dois pacotes suportados, sem apagar os demais ajustes do usuário.
+
+PRESERVAÇÃO
+- build.gradle.kts, app/build.gradle.kts e AndroidManifest.xml permanecem inalterados nesta etapa.
+- Não foram adicionadas dependências.
+- A estrutura de persistência existente (DataStore com JSON) foi mantida.
+- A migração não implementa ainda um sistema completo de múltiplos perfis nomeados.
+
+TESTES EXECUTADOS
+- Teste Kotlin isolado de MouseInputProcessor: passou para deltas válidos, deltas nulos, NaN e contadores.
+- Teste Kotlin isolado de VirtualCursorController: passou para movimento e rejeição de infinito.
+- Verificação estrutural simples de delimitadores nos três arquivos modificados: passou.
+- Revisão estática dos pontos de seleção de pacote e das faixas de configuração: concluída.
+- Integridade do ZIP: verificada após empacotamento.
+
+TESTES NÃO EXECUTADOS
+- Compilação Android completa: não executada. O ambiente não contém Gradle/Gradle Wrapper nem Android SDK configurado.
+- Testes Compose em runtime: não executados.
+- Teste físico no Android, Samsung DeX ou Free Fire: não executado.
+- Injeção real de eventos no jogo: não comprovada nesta etapa.
+
+PENDÊNCIAS IMPORTANTES
+- Implementar um editor visual completo de controles com arrastar/redimensionar e salvar posições.
+- Implementar perfis nomeados com criar/duplicar/renomear/excluir e migração segura.
+- Verificar e completar liberação de todas as teclas/botões no caminho de serviço, inclusive queda do Shizuku e troca de app.
+- Verificar no dispositivo se Pointer Capture consegue receber os eventos no cenário de janela/overlay utilizado. A API não equivale por si só a captura global sobre o jogo.
+- Confirmar se o mecanismo de saída atual é aceito pelo Free Fire no Android/DeX; não inferir isso a partir de testes unitários locais.
+- Completar testes automatizados de coordenadas, mudanças de orientação/resolução, perfis e permissões.
+
+LIMITAÇÕES TÉCNICAS
+Shizuku/ADB não concede automaticamente injeção arbitrária em todos os aplicativos. A capacidade efetiva depende do serviço autorizado, da API usada, da versão do Android e das restrições do destino. Ocultar o cursor não é o mesmo que capturar o ponteiro; Pointer Capture está associado à janela focada. A duração medida pelo diagnóstico interno não representa a latência total percebida no jogo.
+
+CONCLUSÃO
+A v3.9 restringe o produto ao escopo solicitado e melhora a validação das configurações persistidas. É uma etapa de hardening, não uma declaração de conclusão do Prompt Mestre.

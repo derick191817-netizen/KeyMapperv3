@@ -1,0 +1,41 @@
+KEYMAPPER v4.5 — ESTABILIDADE DO MOTOR DE ENTRADA
+
+Escopo desta revisão
+- Corrigir o tratamento de teclas repetidas e cancelar ações atrasadas quando o motor é liberado.
+- Validar os campos críticos dos controles carregados de JSON.
+- Evitar que falhas de atualização da tela e abertura da Activity sejam silenciosas.
+- Preservar a arquitetura, as dependências e os perfis legados existentes.
+
+Arquivos alterados
+1. app/src/main/java/com/example/keymapper/mapping/MappingEngine.kt
+   - Ignora transições duplicadas de tecla/botão enquanto o estado permanece pressionado ou liberado.
+   - Rastreia ações atrasadas (delay, segundo toque de duplo toque e liberação de toque).
+   - Cancela tarefas pendentes em releaseAll(), prevenindo que um duplo toque atrasado seja executado após pausa, perda de foco ou desativação.
+
+2. app/src/main/java/com/example/keymapper/data/HudButton.kt
+   - Rejeita IDs negativos e códigos de tecla inválidos durante a leitura.
+   - Limita nome, coordenadas, tamanho, opacidade e escala visual a intervalos seguros.
+   - Valores NaN/Infinity nos campos validados retornam ao padrão, evitando coordenadas não finitas no editor e no motor.
+   - Mantém o formato JSON existente e a migração de escala da mira.
+
+3. app/src/main/java/com/example/keymapper/service/MappingService.kt
+   - Evita que ACTION_DOWN repetidos nos atalhos de editor/pausa alternem o estado várias vezes.
+   - Registra falhas de atualização de tela e abertura da Activity no Logcat, com feedback visível ao usuário no caso de falha ao abrir.
+
+Validações realizadas no ambiente
+- Inspeção manual dos trechos modificados.
+- Verificação de delimitadores por contagem estática básica.
+- Integridade do ZIP validada com unzip -t.
+- Conferido que build.gradle.kts e AndroidManifest.xml não foram alterados nesta revisão.
+
+Não executado / não confirmado
+- Compilação Gradle/Android: não executada; não há Gradle Wrapper no projeto e o comando gradle não está instalado neste ambiente.
+- Testes unitários instrumentados, APK, dispositivo Android físico, teclado/mouse reais e Samsung DeX: não executados.
+- Não foi possível validar empiricamente se o destino aceita eventos injetados; isso depende do Shizuku, da versão Android e do aplicativo de destino.
+
+Limitações restantes importantes
+- As configurações de botões/sensibilidade ainda são globais no modelo AppSettings. A lista de aplicativos selecionados não equivale a perfis independentes por aplicativo; essa migração exige alterar repositório, seleção de perfil, UI e o caminho de configuração do MappingService.
+- O modo de visão e a injeção dependem do método de entrada e das permissões reais do dispositivo.
+- Os testes em DeX e em jogos de terceiros continuam pendentes.
+
+Nenhuma declaração de compilação ou teste em hardware é feita nesta entrega.

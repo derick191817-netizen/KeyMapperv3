@@ -1,0 +1,8 @@
+KeyMapper v4.7
+- Perfis independentes por pacote para controles e sensibilidade principal.
+- Seleção de perfil no editor e salvamento isolado via DataStore.
+- Troca de perfil no serviço quando muda o aplicativo selecionado em primeiro plano.
+- Sensibilidade X/Y em escala logarítmica e multiplicador geral por perfil.
+- Zoom e deslocamento horizontal/vertical da área de referência sem alteração das coordenadas persistidas.
+- Alça para redimensionar o tamanho funcional dos controles.
+- Não compilado em Android SDK/Gradle neste ambiente; sem teste físico.

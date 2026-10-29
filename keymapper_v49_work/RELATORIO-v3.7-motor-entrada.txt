@@ -1,0 +1,30 @@
+RELATÓRIO TÉCNICO — KeyMapper v3.7 (motor de entrada incremental)
+Data: 2026-10-29
+Base: v3.6-maquina-estados
+
+IMPLEMENTADO NESTA ETAPA
+1. MouseInputProcessor: valida deltas finitos/não nulos, mantém contadores de aceitos/rejeitados e mantém a responsabilidade de sensibilidade no SensitivityEngine existente, evitando aplicar o ganho duas vezes.
+2. InputDeviceManager: identifica a origem/dispositivo de eventos MotionEvent e reconhece fontes mouse e mouse relativo. É observacional; não concede captura global.
+3. VirtualCursorController: separa posição lógica do cursor virtual da coordenada física de toque. O modo relativo usa os deltas para encaminhamento e não usa a posição lógica como coordenada física.
+4. CoordinateTransformer: centraliza conversão entre coordenadas normalizadas e pixels da área do jogo; MappingEngine usa a conversão ao posicionar controles persistentes.
+5. Integração: MappingEngine valida os deltas antes de agregá-los, usa o controlador lógico no modo relativo e reseta o estado lógico ao encerrar a mira. CaptureView usa InputDeviceManager para filtrar fontes de mouse.
+
+REUTILIZADO DO CÓDIGO EXISTENTE
+- SensitivityEngine continua aplicando sensibilidade independente X/Y e curvas já configuradas.
+- InputStateMachine da v3.6 mantém estados explícitos de captura/foco.
+- TouchInjector/Shizuku continuam sendo o caminho de injeção existente; esta etapa não presume que SOURCE_MOUSE_RELATIVE seja aceito pelo jogo.
+- SettingsRepository/DataStore mantém persistência existente.
+
+VALIDAÇÃO ESTÁTICA
+- Verificado que build.gradle.kts e AndroidManifest.xml permanecem sem alterações nesta etapa.
+- Verificação de integridade do ZIP executada na entrega.
+- Verificação estrutural simples de delimitadores nos arquivos Kotlin alterados.
+- Compilação isolada com kotlinc dos módulos puros MouseInputProcessor e VirtualCursorController: aprovada. Isso não equivale à compilação Android completa.
+- Não foi possível executar compilação Android: o ambiente não contém Gradle/Gradle Wrapper nem Android SDK.
+- Não foram executados testes unitários instrumentados nem testes em dispositivo/Free Fire. Portanto, a compatibilidade real de captura global e aceitação de eventos relativos permanece NÃO VERIFICADA.
+
+LIMITAÇÕES IMPORTANTES
+- Android Pointer Capture é limitado à janela focada que o solicita; não é, por si só, captura global sobre outro aplicativo.
+- A disponibilidade de eventos relativos e a aceitação de SOURCE_MOUSE_RELATIVE pelo alvo dependem da versão Android, do método de injeção e do aplicativo destino.
+- InputDeviceManager neste estágio identifica o dispositivo do evento quando acessível; o callback de delta legado não propaga ainda o ID real para o processador (usa -1 como desconhecido).
+- Esta é uma etapa incremental: ainda faltam o repositório completo de perfis por jogo, editor avançado de coordenadas, testes automatizados executáveis e integração completa dos atalhos editáveis para captura/liberação.

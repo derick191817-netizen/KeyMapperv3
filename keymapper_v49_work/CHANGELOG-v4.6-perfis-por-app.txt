@@ -1,0 +1,8 @@
+KeyMapper v4.6
+- Adicionados perfis persistentes independentes por packageName.
+- Editor passa a selecionar o perfil de cada aplicativo configurado.
+- Sensibilidade X/Y e geral podem ser ajustadas por perfil no editor.
+- Serviço troca configurações ao detectar mudança entre aplicativos selecionados e libera entradas antes da troca.
+- Persistência de perfil isolada em transação DataStore.
+- Compatibilidade de leitura com settings_json legado sem campo profiles.
+- Build Android e teste físico não realizados neste ambiente.

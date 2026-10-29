@@ -1,0 +1,22 @@
+KeyMapper v2.4 — auditoria e correções de estabilidade
+
+Alterações implementadas:
+- Configuração BS: valores de fábrica solicitados (NUM3, 69, 0.9, 16240, 199).
+- Olhar livre posição X agora usa uma escala lógica documentada de 0..1000, convertida para a largura da área do jogo; não é tratada como pixel físico.
+- Migração das configurações antigas de posição X salvas como porcentagem 0..100 para a escala 0..1000.
+- Ajuste 16240 é normalizado como fator 1x e limitado a 0.25x..4x para evitar escalas extremas.
+- Captura de tecla NUM3 mostra o rótulo solicitado e mantém o código KeyEvent.
+- Biblioteca lateral Tap/Fire/Aim/WASD passa a ser desenhada no modo de edição; antes a função existia, mas não era chamada no desenho.
+- Barra de edição não fica desenhada durante o jogo normal.
+- Hit testing prioriza os últimos elementos desenhados, alinhando a interação com a ordem visual.
+- Alocação de IDs de ponteiro dos botões evita colisões após criar vários controles.
+- TouchInjector usa referência de 8,333 ms e agenda com arredondamento seguro para a resolução de milissegundos do Handler; eventos críticos flusham o MOVE antes de UP/DOWN.
+- Mantida liberação de MotionEvent em finally; logs de falha e callback de erro do injetor foram reforçados.
+- ShizukuInjector registra falhas consecutivas sem inundar o log; o serviço informa tentativa automática de recuperação.
+- Ajustes BS continuam sendo aplicados ao motor via AppSettings observado pelo serviço e persistência existente.
+
+Limitações conhecidas:
+- O painel flutuante existente usa Android Views nativas (EditText), não Compose OutlinedTextField. Foi preservada a arquitetura do overlay para não introduzir uma janela Compose paralela.
+- WASD é um joystick global no modelo atual; a ferramenta centraliza o joystick existente, não cria múltiplos joysticks independentes, pois o motor e AppSettings só suportam um joystick.
+- O modo infinito por toque ainda depende da aceitação do jogo para a sequência de troca de contato na borda. A injeção de mouse relativo permanece experimental e só funciona em jogos que leem mouse nativo.
+- Não há validação física no Samsung/DeX nesta entrega.

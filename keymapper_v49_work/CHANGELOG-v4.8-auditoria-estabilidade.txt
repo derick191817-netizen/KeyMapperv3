@@ -1,0 +1,18 @@
+KeyMapper v4.8 — Auditoria de estabilidade
+
+- Removidos logs de alta frequência no caminho do mouse e da injeção.
+- Cursor virtual agora agrupa atualizações por frame.
+- Reduzida a prioridade da thread de injeção de URGENT_DISPLAY para DISPLAY.
+- Removido PARTIAL_WAKE_LOCK e alterado o serviço para START_NOT_STICKY.
+- BootReceiver passou a ler configurações em segundo plano com goAsync.
+- ForegroundWatcher cancela callbacks obsoletos ao parar/reiniciar.
+- Trocas de perfil congelam o motor até que estados antigos sejam liberados e a fila de limpeza termine.
+- Atualização do HUD por mudança da mira é encaminhada para a thread principal.
+- Adicionada limpeza de inicialização parcial e logs de erros relevantes.
+- Escopo do HiddenApiBypass limitado às interfaces internas utilizadas.
+- Validação finita/faixas e limites de tamanho reforçados nas configurações e perfis.
+- Backup interno de JSON inválido antes de substituição; escritas globais preservam perfis atuais.
+- Incrementada a versão Android para versionCode 3 / versionName 0.3.0.
+
+Validação estática: 17 checks passam. Gradle/APK e testes em dispositivo continuam pendentes
+porque o ambiente não possui Gradle Wrapper, Gradle instalado ou Android SDK.

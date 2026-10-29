@@ -1,0 +1,6 @@
+KeyMapper v4.5
+- Ignora eventos de tecla duplicados no estado do motor.
+- Cancela ações atrasadas ao liberar todos os estados de entrada.
+- Valida IDs, códigos de tecla e valores visuais críticos ao carregar controles.
+- Adiciona logs úteis para falhas de atualização de tela e abertura da Activity.
+- Não altera dependências nem manifesto.

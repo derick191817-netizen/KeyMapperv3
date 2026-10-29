@@ -1,0 +1,11 @@
+KeyMapper v4.3 — Editor visual responsivo
+
+- Reorganiza o editor em três regiões no layout largo: ferramentas, área de referência e propriedades.
+- Em telas menores, adapta as ferramentas para uma faixa horizontal e mantém propriedades em painel rolável.
+- Adiciona fluxo de ferramenta ativa: selecionar Tecla/Toque, Tiro ou Mira e tocar/clicar na área para criar o controle no ponto escolhido.
+- Mantém seleção, arraste, posicionamento por X/Y, tipo, comportamento, código de tecla/botão, tamanho funcional, escala visual e opacidade.
+- Diferencia a escala visual do marcador do tamanho funcional armazenado.
+- Adiciona alternância de grade, restauração individual a partir do snapshot salvo, cancelamento do rascunho e ações Salvar/Concluir.
+- Mantém a área como referência visual 16:9 claramente identificada; não simula captura ao vivo.
+- Não implementa desfazer/refazer, zoom, pan, captura direta de tecla física ou redimensionamento por alças nesta versão.
+- Nenhuma dependência, build.gradle.kts ou AndroidManifest.xml foi alterado.

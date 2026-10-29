@@ -1,0 +1,23 @@
+KEYMAPPER v4.4 — HISTÓRICO DE EDIÇÃO
+
+Base: KeyMapper v4.3 — Editor Visual Responsivo.
+
+IMPLEMENTADO
+- Ações Desfazer e Refazer no cabeçalho do editor.
+- Histórico limitado a 50 estados anteriores para limitar uso de memória.
+- O arraste é agrupado em uma operação: a posição inicial é registrada e o estado final pode ser desfeito em um passo, em vez de criar uma entrada por frame.
+- As alterações feitas em propriedades, criação e exclusão participam do histórico.
+- Cancelar restaura o último snapshot salvo e limpa o histórico da sessão.
+- Seleção é corrigida após desfazer/refazer para evitar apontar para um ID removido.
+- O histórico trabalha sobre a lista HudButton usada pelo modelo atual; não substitui o motor de mapeamento.
+
+VALIDAÇÃO ESTÁTICA
+- Conferidos os delimitadores {}, (), [] no arquivo MappingEditorScreen.kt.
+- ZIP validado com unzip -t.
+
+NÃO VALIDADO
+- Não foi possível executar a compilação Android neste ambiente (sem Gradle/Gradle Wrapper e Android SDK configurados).
+- Não foram realizados testes em aparelho Android, teclado/mouse físico ou Samsung DeX.
+- A associação de tecla ainda utiliza o campo numérico de código; captura direta de tecla física não foi adicionada nesta versão.
+- Zoom/pan e alças de redimensionamento ainda não implementados.
+- O histórico é local à sessão do editor e não persiste após fechar o editor/aplicativo; os dados salvos continuam sendo persistidos pelo repositório existente.

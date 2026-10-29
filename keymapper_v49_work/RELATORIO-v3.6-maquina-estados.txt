@@ -1,0 +1,48 @@
+KEYMAPPER v3.6 — MÁQUINA DE ESTADOS DE ENTRADA
+
+ESCOPO DESTA VERSÃO
+Esta entrega continua a evolução incremental da v3.5. Implementa uma máquina de estados explícita para a camada de entrada e integra as transições observadas na captura e na interface flutuante. Não declara o projeto mestre inteiro concluído.
+
+AUDITORIA RESUMIDA
+1. CaptureView.kt recebia mudanças de foco/captura, mas não havia uma única máquina de estados comum para representar INACTIVE, CONFIGURATION, GAME_READY, POINTER_CAPTURED, POINTER_RELEASED, SUSPENDED e ERROR.
+2. OverlayManager.kt atualizava InputDiagnostics em alguns caminhos, enquanto CaptureView atualizava captura/foco por outro caminho. Isso podia deixar o estado exibido pouco consistente em transições rápidas.
+3. O caminho de remoção de overlays fechava painel/menu e depois removia as janelas. A v3.6 garante que o estado final seja INACTIVE depois da limpeza, e não um estado intermediário da captura.
+
+ALTERAÇÕES
+- Novo input/InputStateMachine.kt:
+  * enum InputState com os sete estados requeridos;
+  * transições sincronizadas e registro de motivo;
+  * validação de transições esperadas, com opção force para eventos de ciclo de vida autoritativos;
+  * logs de transição e integração com InputDiagnostics.setMode.
+- input/CaptureView.kt:
+  * start/stop informam GAME_READY/POINTER_RELEASED;
+  * perda de foco com captura desejada informa SUSPENDED;
+  * mudança real de Pointer Capture informa POINTER_CAPTURED/POINTER_RELEASED;
+  * não substitui o estado CONFIGURATION quando a captura já foi desativada para abrir o painel.
+- overlay/OverlayManager.kt:
+  * abertura/fechamento do painel informa CONFIGURATION/GAME_READY;
+  * remoção de overlays finaliza em INACTIVE após limpar as janelas.
+
+LIMITES E REQUISITOS AINDA PENDENTES
+- A máquina representa estado observado do KeyMapper; não cria captura global quando o Android não a concede.
+- Não foi implementado ainda um gerenciador de estado lógico completo com identificação de dispositivo, botão físico e perfil por jogo.
+- O mapeamento ainda usa as estratégias existentes de toques e eventos relativos. SOURCE_MOUSE_RELATIVE precisa de validação no jogo e no dispositivo alvo.
+- Não foram adicionados motores novos de WASD, persistência de perfis ou editor drag-and-drop nesta etapa.
+
+VALIDAÇÃO EXECUTADA
+- Comparação byte a byte: app/build.gradle.kts inalterado.
+- Comparação byte a byte: app/src/main/AndroidManifest.xml inalterado.
+- Inspeção estática dos pontos de transição e limpeza de overlays.
+- Verificação de integridade do ZIP após empacotamento.
+
+VALIDAÇÃO NÃO EXECUTADA
+- Compilação Gradle: não executada; este ambiente não tem Gradle/Gradle Wrapper nem Android SDK disponíveis.
+- Testes instrumentados e execução em celular/DeX: não executados.
+- Teste de aceitação no Free Fire: não executado.
+
+PRÓXIMAS PRIORIDADES
+1. Obter compilação Gradle real e corrigir eventuais erros.
+2. Testar perda/retorno de foco, abertura do painel, captura/liberação e desconexão do mouse em dispositivo físico.
+3. Adicionar testes determinísticos para a máquina de estados e para transformação de coordenadas.
+4. Medir se o jogo recebe SOURCE_MOUSE_RELATIVE e manter fallback explicitamente identificado quando não recebe.
+5. Tratar sequência/soltura de teclas e botões no motor de mapeamento sob perda de serviço.

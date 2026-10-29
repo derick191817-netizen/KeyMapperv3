@@ -1,0 +1,135 @@
+KEYMAPPER v4.8 — AUDITORIA DE ESTABILIDADE E CORREÇÕES PREVENTIVAS
+Data: 2026-10-29
+Base: KeyMapper v4.7 — perfis por aplicativo e editor de precisão
+Versão Android declarada: minSdk 26, targetSdk 34, compileSdk 34
+
+RESUMO
+Esta versão aplica correções direcionadas aos caminhos de entrada, ciclo de vida do serviço,
+monitoramento de aplicativo em primeiro plano, janelas overlay e leitura/persistência de dados.
+Não foi possível confirmar a causa exata dos travamentos reportados porque não havia logcat,
+trace de ANR, dump de crash reproduzível nem dispositivo Android disponível nesta execução.
+Os itens abaixo são defeitos/risco identificados por inspeção estática; não representam prova de
+que cada item tenha causado o problema no aparelho.
+
+ACHADOS E CORREÇÕES
+1. Logs por evento de alta frequência
+   Arquivos: service/MappingService.kt, input/CaptureView.kt, injection/TouchInjector.kt
+   Achado: o movimento do mouse e os eventos de injeção escreviam mensagens de debug a cada evento.
+   Correção: removidos os logs por evento; métricas agregadas continuam em InputDiagnostics.
+   Efeito esperado: menos trabalho de logging e menos volume no logcat durante sessões intensas.
+
+2. Atualização do cursor virtual em cada evento
+   Arquivo: overlay/OverlayManager.kt
+   Achado: cada delta podia chamar WindowManager.updateViewLayout e invalidate diretamente.
+   Correção: acumula deltas e agenda uma atualização por frame com postOnAnimation; cancela callback
+   ao remover as janelas e registra falhas de atualização.
+   Efeito esperado: menos chamadas de WindowManager e menos trabalho redundante no caminho de mouse.
+
+3. Prioridade excessiva da thread de injeção
+   Arquivo: injection/TouchInjector.kt
+   Achado: a HandlerThread usava THREAD_PRIORITY_URGENT_DISPLAY.
+   Correção: passou para THREAD_PRIORITY_DISPLAY, mantendo prioridade de resposta sem a prioridade
+   mais agressiva do sistema.
+
+4. Serviço mantendo CPU ativa e pedindo reinício automático
+   Arquivos: service/MappingService.kt, AndroidManifest.xml
+   Achado: PARTIAL_WAKE_LOCK era adquirido durante a vida do serviço e o serviço retornava START_STICKY.
+   Correção: removido o wakelock e a permissão WAKE_LOCK; serviço retorna START_NOT_STICKY.
+   Efeito esperado: o KeyMapper deixa de manter a CPU acordada apenas por causa desse lock e não pede
+   ao Android para ressuscitar automaticamente o motor após encerramento pelo sistema.
+   Observação: o serviço ainda é um foreground service enquanto iniciado; a ativação automática opt-in
+   configurada pelo usuário continua no BootReceiver.
+
+5. Leitura bloqueante na inicialização
+   Arquivo: service/BootReceiver.kt
+   Achado: runBlocking aguardava o DataStore dentro da thread de broadcast.
+   Correção: leitura em Dispatchers.IO com goAsync(), conclusão garantida em finally e erro registrado.
+   Não há loop de retentativa se o Android proibir o início do serviço.
+
+6. Troca de perfil e callback obsoleto do monitor
+   Arquivos: injection/ForegroundWatcher.kt, mapping/MappingEngine.kt, service/MappingService.kt
+   Achado: callbacks já enfileirados podiam ser entregues após stop/restart; tarefas de entrada já
+   enfileiradas podiam observar o perfil novo antes da limpeza do estado antigo.
+   Correção: geração/token por execução no watcher; o motor congela entrada imediatamente antes de
+   troca de perfil, libera estados na thread de entrada e só volta a aceitar eventos após a fila de
+   limpeza e reconstrução. O handler também rejeita eventos que já estavam na fila quando foi pausado.
+   Mantida cadência de um segundo enquanto habilitado. Falhas de reflexão/binder são registradas.
+
+7. Atualização de View fora da thread principal
+   Arquivo: service/MappingService.kt
+   Achado: o callback de mudança da mira é chamado pelo motor na thread de injeção e acionava o HUD.
+   Correção: refresh do overlay é postado na main thread.
+
+8. Inicialização parcial do motor
+   Arquivo: service/MappingService.kt
+   Achado: falhas durante o registro de listeners podiam deixar componentes parcialmente montados.
+   Correção: registro e rebuild protegidos por tratamento de Exception com tentativa de remover listeners,
+   ocultar overlay, liberar motor e encerrar watcher/injetor. O coletor de configurações registra falhas
+   por emissão em vez de encerrar silenciosamente por uma exceção pontual.
+
+9. Bypass amplo de APIs ocultas
+   Arquivo: KeyMapperApp.kt
+   Achado: HiddenApiBypass usava o prefixo global "L", amplo demais para as APIs necessárias.
+   Correção: escopo limitado a InputEvent, IInputManager e IActivityTaskManager.
+   A compatibilidade desse escopo ainda exige teste em dispositivos/versões Android reais.
+
+10. Configurações inválidas ou desproporcionais
+    Arquivos: data/HudButton.kt, data/AppProfile.kt, data/AppSettings.kt
+    Achado: alguns campos numéricos de controles aceitavam NaN/Infinity e listas JSON não tinham limite
+    explícito de leitura.
+    Correção: normalização de campos numéricos, limites de tamanho para macros, controles, jogos,
+    perfis e documento JSON. Campos de mira/tiro passam por validação de finitude e faixa.
+
+11. Preservação de dados de configuração
+    Arquivo: data/SettingsRepository.kt
+    Achado: uma escrita posterior poderia substituir uma configuração JSON inválida sem manter cópia.
+    Correção: antes de substituir documento com raiz inválida ou acima do limite, guarda uma cópia
+    limitada em settings_json_recovery_backup. Escritas globais preservam o conjunto de perfis e o
+    perfil selecionado que já estejam no DataStore, evitando rollback desses dados por snapshot antigo.
+    Limite: o backup é interno ao DataStore; não foi adicionada uma tela de restauração.
+
+12. Versão
+    Arquivo: app/build.gradle.kts
+    Alterado versionCode para 3 e versionName para 0.3.0.
+
+ARQUIVOS ALTERADOS
+- app/src/main/java/com/example/keymapper/KeyMapperApp.kt
+- app/src/main/java/com/example/keymapper/service/MappingService.kt
+- app/src/main/java/com/example/keymapper/mapping/MappingEngine.kt
+- app/src/main/java/com/example/keymapper/service/BootReceiver.kt
+- app/src/main/java/com/example/keymapper/injection/ForegroundWatcher.kt
+- app/src/main/java/com/example/keymapper/injection/TouchInjector.kt
+- app/src/main/java/com/example/keymapper/input/CaptureView.kt
+- app/src/main/java/com/example/keymapper/overlay/OverlayManager.kt
+- app/src/main/java/com/example/keymapper/data/HudButton.kt
+- app/src/main/java/com/example/keymapper/data/AppProfile.kt
+- app/src/main/java/com/example/keymapper/data/AppSettings.kt
+- app/src/main/java/com/example/keymapper/data/SettingsRepository.kt
+- app/src/main/AndroidManifest.xml
+- app/build.gradle.kts
+- scripts/audit_stability_checks.py
+
+TESTES EXECUTADOS E RESULTADOS
+- Integridade do ZIP de entrada v4.7: passou.
+- scripts/audit_stability_checks.py: 17 verificações estáticas passaram.
+- Parse XML de AndroidManifest.xml pelo ElementTree: passou.
+- Verificação de sintaxe Kotlin com kotlinc sobre arquivos alterados: nenhum diagnóstico de sintaxe
+  encontrado. O compilador não conseguiu resolver símbolos Android/Compose/Shizuku porque o SDK e as
+  dependências Android não estão disponíveis; isso não é uma compilação bem-sucedida.
+- Busca estática por runBlocking, PARTIAL_WAKE_LOCK, START_STICKY e logs por evento: sem ocorrências
+  ativas nos caminhos verificados.
+
+TESTES NÃO EXECUTADOS
+- Compilação Gradle completa: não executada; não há Gradle instalado nem Gradle Wrapper no projeto.
+- Compilação de APK: não realizada.
+- Testes unitários/instrumentados Android: não executados; ambiente sem Android SDK/emulador.
+- Reprodução de crash, ANR, leak ou consumo de CPU/RAM: não executada em dispositivo.
+- Testes em Samsung DeX, mudança de monitor/densidade, Android 13/14, Shizuku revogado/desconectado,
+  uso contínuo e troca rápida de aplicativo: pendentes.
+- Teste funcional de toque/mouse injetado no aplicativo de destino: pendente.
+
+LIMITES
+Estas alterações reduzem riscos identificáveis no código, mas não provam ausência de crashes nem
+confirmam que os problemas relatados foram eliminados. Para fechar o diagnóstico, é necessário testar
+no aparelho e coletar logcat/ANR imediatamente após reproduzir o sintoma. Não foi gerado APK nesta
+execução.

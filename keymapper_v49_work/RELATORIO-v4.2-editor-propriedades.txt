@@ -1,0 +1,22 @@
+KEYMAPPER v4.2 — EDITOR DE PROPRIEDADES
+
+Base: KeyMapper v4.1.
+
+ALTERAÇÕES
+- Importação explícita de Mode no editor, corrigindo uma referência que poderia impedir a compilação Kotlin.
+- Adicionados seletores de comportamento: Segurar, Toque, Alternar e Duplo; para controles de tiro, a interface oferece apenas Segurar e Toque.
+- Adicionado ajuste de opacidade visual, aplicado ao preenchimento e contorno dos controles no editor. A opacidade não altera coordenadas nem os eventos de entrada.
+- Adicionados ajustes de posição X/Y em porcentagem, sincronizados com o modelo HudButton e a visualização.
+- Adicionados chips para associar rapidamente os códigos de mouse esquerdo, direito e scroll.
+- Mantida a escala visual separada do tamanho base e da posição funcional.
+
+COMPATIBILIDADE
+- O mapeador não está limitado ao Free Fire. A lista KNOWN_3D do MappingEngine serve apenas para escolher a heurística do modo de rotação automática; não é uma lista de bloqueio de aplicativos.
+- DEFAULT_GAMES mantém Free Fire/Free Fire MAX como seleções iniciais, mas AppSettings.games aceita outros pacotes selecionados pelo usuário.
+- Os perfis ainda usam a lista global de controles; não há isolamento automático de configurações por aplicativo nesta revisão.
+
+VALIDAÇÃO
+- Verificação estática dos arquivos modificados e integridade do arquivo ZIP.
+- Não foi possível executar uma compilação Gradle: este ambiente não tem Gradle/Wrapper nem Android SDK configurado.
+- Não foram executados testes em dispositivo físico, DeX ou jogos/aplicativos de terceiros.
+- A associação de tecla física ainda é editada por código numérico; captura interativa de tecla não foi implementada nesta revisão.

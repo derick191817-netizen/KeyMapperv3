@@ -1,0 +1,26 @@
+KeyMapper v4.0 — Compatibilidade Android e Samsung DeX
+
+Base: KeyMapper v3.9-auditoria-mestre.
+
+Arquivos alterados:
+- app/src/main/java/com/example/keymapper/input/InputDeviceManager.kt
+- app/src/main/java/com/example/keymapper/display/DisplayUtils.kt
+- app/src/main/java/com/example/keymapper/ui/SettingsScreen.kt
+
+Alterações:
+1. InputDeviceManager lista dispositivos reconhecidos pelo Android, classifica mouse, teclado, gamepad, origem virtual/externa e permite observar adição, remoção e alteração de dispositivos.
+2. Diagnóstico da tela Sistema mostra resumo de periféricos e distingue modo desktop reportado pelo Android de monitor externo sem confirmação de DeX.
+3. DisplayUtils.gameArea protege contra dimensões inválidas durante redimensionamento/orientação; proporção e densidade inválidas usam valores seguros.
+4. O manifesto, build.gradle.kts e dependências não foram alterados.
+
+Validação realizada:
+- Inspeção do minSdk/targetSdk/compileSdk: minSdk 26, targetSdk 34, compileSdk 34.
+- Verificação textual dos arquivos alterados e estrutura dos diretórios.
+- Integridade do ZIP verificada após empacotamento.
+
+Não realizado:
+- Compilação Gradle completa.
+- Testes unitários Android, emulador, aparelho físico, Samsung DeX ou Free Fire.
+- Testes reais de mouse USB/Bluetooth e teclado físico.
+
+Não declarar esta versão compilada ou testada no dispositivo. O ambiente disponível não tem Gradle/Wrapper e Android SDK configurados.

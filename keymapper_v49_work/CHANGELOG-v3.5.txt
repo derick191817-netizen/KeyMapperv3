@@ -1,0 +1,11 @@
+KeyMapper v3.5 — evolução do caminho de entrada
+
+- Corrigido o uso indevido de coordenadas absolutas como delta com Pointer Capture ativo.
+- O fallback de hover ignora a primeira coordenada para evitar salto inicial.
+- Movimentos relativos rápidos são acumulados e agrupados, em vez de descartados.
+- Removida a pausa artificial SystemClock.sleep do caminho de injeção.
+- Painel de configuração usa SOFT_INPUT_ADJUST_RESIZE + SOFT_INPUT_STATE_UNCHANGED.
+- Adicionado diagnóstico local de mouse, teclado, captura, foco e duração interna de injeção.
+- Sem alterações em app/build.gradle.kts ou AndroidManifest.xml.
+
+Não compilado com Gradle/Android SDK e não testado em aparelho físico nesta execução.

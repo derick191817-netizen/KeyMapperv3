@@ -1,0 +1,36 @@
+RELATÓRIO TÉCNICO — KeyMapper v4.3
+
+Escopo
+Redesign do editor de mapeamento visual no projeto existente, preservando o modelo HudButton, o repositório SettingsViewModel e a integração existente com o motor.
+
+Arquivos alterados
+- app/src/main/java/com/example/keymapper/ui/MappingEditorScreen.kt
+- CHANGELOG-v4.3-editor-visual.txt
+- RELATORIO-v4.3-editor-visual.txt
+
+Implementado no código
+- Layout adaptável: em janelas largas, ferramentas à esquerda, área de edição ao centro e propriedades à direita; em telas estreitas, ferramentas horizontais e propriedades roláveis.
+- Ferramentas para os três tipos realmente definidos pelo modelo atual: Tecla/Toque (STANDARD), Tiro (FIRE) e Mira (AIM).
+- Selecionar, adicionar com toque/clique na área, arrastar e mover controles.
+- Propriedades para nome, tipo, comportamento, código de tecla/botão, X/Y, tamanho funcional, escala visual e opacidade.
+- Grade opcional, restaurar controle selecionado para seu valor do último snapshot salvo, cancelar alterações locais, salvar e concluir.
+- Coordenadas normalizadas da área de referência 16:9.
+- O salvamento continua usando viewModel.update e o campo buttons existente; o motor existente lê o mesmo modelo HudButton.
+
+Não implementado nesta versão
+- Undo/redo.
+- Zoom e deslocamento (pan) da área de referência.
+- Redimensionamento por alças no canvas.
+- Captura direta de tecla física com confirmação/conflito; o campo de código permite edição numérica e botões de mouse predefinidos são identificados por códigos negativos.
+- Perfis independentes por aplicativo.
+- Captura ao vivo da tela do jogo.
+
+Validação
+- Revisão estática do arquivo alterado e verificação básica de delimitadores executadas.
+- Integridade do ZIP verificada com unzip -t.
+- Compilação Android não executada: o ambiente não tem Gradle/Gradle Wrapper nem Android SDK configurado.
+- Não foram realizados testes em dispositivo Android físico, mouse/teclado externos ou Samsung DeX.
+
+Limitações e cautela
+- A interface editoral altera os dados HudButton existentes, mas a operação funcional final continua dependendo da autorização de injeção, foco, compatibilidade do Android e aceitação de eventos pelo aplicativo-alvo.
+- A representação é uma área de referência, não uma captura do jogo.
