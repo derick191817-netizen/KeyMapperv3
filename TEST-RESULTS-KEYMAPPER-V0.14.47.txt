@@ -1,0 +1,33 @@
+KEYMAPPER 0.14.47 — RESULTADO DAS VERIFICAÇÕES
+
+CORREÇÃO
+- app/build.gradle.kts: kotlinOptions/jvmTarget String removido.
+- Migrado para kotlin.compilerOptions com JvmTarget.fromTarget("17").
+- Java compileOptions mantidos em 17.
+- Workflow artifact: keymapper-0.14.47-debug.
+
+TESTES EXECUTADOS NESTA SESSÃO
+- tools/native-tests/run.sh: PASS
+- tools/native-tests/check-syntax.sh: PASS
+- tools/native-tests/check-library-contract.sh: PASS
+- Busca por bloco kotlinOptions legado: PASS (nenhuma ocorrência de código)
+- Busca por jvmTarget = "17": PASS (nenhuma ocorrência)
+- versionName 0.14.47 / versionCode 63: PASS
+- Java sourceCompatibility / targetCompatibility 17: PASS
+- Kotlin JvmTarget.fromTarget("17"): PASS
+- Nome do artefato GitHub Actions atualizado: PASS
+- YAML workflow: PASS
+- ZIP test / checksum: validado no empacotamento
+
+BUILD ANDROID
+- Tentativa do Gradle Wrapper :app:tasks --all: BLOQUEADA antes da configuração do projeto.
+- Motivo: UnknownHostException: services.gradle.org ao baixar Gradle 8.8.
+- Android SDK: ANDROID_HOME e ANDROID_SDK_ROOT ausentes.
+- lintDebug: não confirmado.
+- testDebugUnitTest Gradle: não confirmado.
+- assembleDebug: não confirmado.
+- APK: não gerado.
+- GitHub Actions remoto: não executado nesta sessão.
+
+NOTA
+A migração usa a forma tipada documentada oficialmente pelo Kotlin para projetos Android/JVM. O erro específico das capturas deve ser removido. O resultado integral do próximo workflow depende da execução remota com Gradle e Android SDK.

@@ -1,0 +1,38 @@
+KeyMapper 0.14.43 — relatório de validação
+
+KOTLIN/JVM
+- 81 testes de regressão das políticas de câmera/cursor/sensibilidade/entrada: aprovados nesta sessão.
+- 3 testes de NativeBatchCallbackForwarder: aprovados nesta sessão com kotlinc 1.9.0 e stubs JUnit locais.
+- Total: 84 testes Kotlin/JVM isolados, 0 falhas.
+
+Cobertura dos 3 testes novos:
+1. Entrega bem-sucedida encaminha o mesmo array e não aciona o callback de erro.
+2. A falha do callback é reportada e a mesma instância de Throwable é relançada.
+3. Uma falha do bloco de diagnóstico não mascara a falha de entrega original.
+
+C++ HOST
+PASS tools/native-tests/run.sh
+- Agregação de falhas por deviceId e união das classes.
+- Marcadores SYN_DROPPED prefixados antes de eventos novos.
+- Falhas repetidas agregam dispositivos.
+- Entrega bem-sucedida limpa pendências.
+- Recuperação marker-only sem eventos novos.
+
+SINTAXE NATIVA
+PASS tools/native-tests/check-syntax.sh
+- evdev_capture.cpp
+- uinput_touch.cpp
+
+CONFIGURAÇÃO
+PASS versionName 0.14.43 / versionCode 59 / artifact keymapper-0.14.43-debug.
+PASS YAML do GitHub Actions parseável.
+PASS workflow chama o harness C++ e a verificação sintática.
+
+BUILD ANDROID
+Tentativa de ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug.
+Bloqueio anterior à configuração/compilação: UnknownHostException em services.gradle.org ao baixar Gradle 8.8. Android SDK não configurado no ambiente.
+Não foram executados AGP, Android Lint, testes Android/Gradle, build NDK/CMake pelo Gradle ou assembleDebug. Nenhum APK foi produzido.
+
+CI E HARDWARE
+- GitHub Actions remoto não foi disparado/executado nesta sessão.
+- Não houve teste físico no Note 20 Ultra / Android 13 / DeX nem em jogos.

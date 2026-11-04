@@ -1,0 +1,37 @@
+KeyMapper 0.14.44 — relatório de validação
+Data: 2026-11-04
+
+KOTLIN PURO (kotlinc 1.9.0 + harness JUnit-lite temporário)
+- LookReanchorPlannerTest: 20 aprovados
+- LookBoundaryPolicyTest: 9 aprovados
+- Total: 29 aprovados, 0 falhas
+
+Cobertura adicional:
+- Limite circular, interseção segmento-círculo, diagonais e raio seguro
+- Continuação por batches limitados sem perda de delta
+- Movimento subpixel (0,35 px)
+- Mudança de direção sem viés
+- Configuração e normalização do Auto Release
+- Geometria inválida, raio negativo/não finito e origem fora do raio
+
+NATIVO
+- tools/native-tests/run.sh: PASS
+- tools/native-tests/check-syntax.sh: PASS (evdev_capture.cpp e uinput_touch.cpp)
+
+METADADOS/EMPACOTAMENTO
+- versionName: 0.14.44
+- versionCode: 60
+- Artifact: keymapper-0.14.44-debug
+- YAML do workflow: válido
+- unzip -t: PASS
+- SHA-256: válido
+
+BUILD ANDROID
+- Gradle Wrapper 8.8: não disponível em cache; download anterior bloqueado por UnknownHostException services.gradle.org.
+- Android SDK: ANDROID_HOME/ANDROID_SDK_ROOT não configurados.
+- :app:testDebugUnitTest / lintDebug / assembleDebug: não executados via Gradle.
+- GitHub Actions remoto: não executado.
+- APK: não gerado.
+- Teste físico no Note 20 Ultra/DeX: não realizado.
+
+Observação: os testes Kotlin acima foram executados isoladamente com harness temporário e não substituem a suíte oficial Gradle/Android.

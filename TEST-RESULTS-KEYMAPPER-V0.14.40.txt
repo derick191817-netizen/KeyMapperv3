@@ -1,0 +1,29 @@
+KeyMapper 0.14.40 — Testes focados em movimento contínuo
+
+RESULTADO: 56 aprovados, 0 falhas.
+
+48 testes anteriores reaplicados:
+- LookReanchorPlannerTest: 10
+- LookModePolicyTest: 6
+- TouchPointerPolicyTest: 3
+- SensitivityEngineTest: 10
+- VirtualCursorControllerTest: 9
+- CursorReanchorPolicyTest: 9
+
+8 novos testes NativeMouseReportAggregatorTest:
+PASS combinesBothAxesIntoOneVectorAndUsesReportTimestamp
+PASS sumsRepeatedAxisEventsWithinOneReport
+PASS reportMaySpanMultipleJniBatches
+PASS devicesNeverSharePendingAxisState
+PASS preControlFlushUsesLastAxisTimestamp
+PASS droppedReportIsDiscardedWithoutAResidualSample
+PASS clearRemovesEveryIncompleteDeviceReport
+PASS pathologicalReportIsBoundedWithoutIntegerOverflow
+
+Validações complementares:
+PASS g++ -std=c++17 -fsyntax-only app/src/main/cpp/evdev_capture.cpp
+PASS checksum SHA-256 do pacote de entrada verificado antes da alteração
+PASS versão e artifact ID preparados para 0.14.40 / 56
+
+Método: kotlinc JVM 1.9.0 em classes puras + stubs JUnit locais. Não é o runner JUnit/Gradle oficial.
+Limitações: Gradle/AGP/Android SDK/NDK build completo não executado; nenhum APK produzido; nenhuma validação em Samsung Note 20 Ultra, Android 13, One UI, Samsung DeX ou jogo real.

@@ -1,0 +1,23 @@
+KeyMapper 0.14.45 — resultado de validação
+==========================================
+
+Testes unitários isolados Kotlin/JVM: 242 PASS, 0 FAIL.
+Observação: execução por harness local com stubs temporários para APIs Android/Shizuku/JUnit; não é substituto de Gradle testDebugUnitTest.
+
+C++ host tests (evdev batch recovery): PASS.
+Sintaxe C++ JNI (evdev_capture.cpp e uinput_touch.cpp): PASS.
+Contrato CMake/JNI/diagnóstico (check-library-contract.sh): PASS.
+Workflow YAML: parse local PASS.
+Versão Gradle: versionName=0.14.45; versionCode=61.
+Artefato CI: keymapper-0.14.45-debug.
+Pacote fonte ZIP: unzip -t PASS; SHA-256 PASS.
+
+Build Android Gradle: NÃO EXECUTADO COMPLETAMENTE.
+Tentativa: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug --stacktrace --console=plain
+Bloqueio: UnknownHostException: services.gradle.org ao baixar Gradle 8.8.
+Android SDK: ANDROID_HOME e ANDROID_SDK_ROOT não configuradas.
+APK: NÃO GERADO.
+GitHub Actions remoto: NÃO EXECUTADO/CONFIRMADO.
+Teste físico Samsung Note 20 Ultra / Android 13 / DeX: NÃO EXECUTADO.
+
+Interpretação: validações isoladas e nativas do host passaram. O aplicativo não está comprovado como funcional end-to-end até build Android e validação física.

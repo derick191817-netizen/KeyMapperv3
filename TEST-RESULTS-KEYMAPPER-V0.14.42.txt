@@ -1,0 +1,50 @@
+KeyMapper 0.14.42 — relatório de validação
+
+KOTLIN/JVM
+RESULTADO: 81 aprovados, 0 falhas.
+Método: kotlinc JVM 1.9.0 + stubs locais JUnit 4 + runner de reflexão.
+
+Classes executadas:
+- LookReanchorPlannerTest
+- LookModePolicyTest
+- TouchPointerPolicyTest
+- SensitivityEngineTest
+- VirtualCursorControllerTest
+- CursorReanchorPolicyTest
+- NativeMouseReportAggregatorTest
+- NativeInputBatchLossGuardTest
+- InputEventQueueTest
+
+Esses testes são Kotlin/JVM isolados. Não equivalem à execução oficial do Gradle/JUnit Android.
+
+C++ HOST
+PASS tools/native-tests/run.sh
+Cobertura do EvdevBatchRecovery:
+- Falha de lote agrega dispositivos sem duplicar IDs.
+- Classes do mesmo deviceId são combinadas.
+- SYN_DROPPED é prefixado antes dos registros novos.
+- Nova falha mantém e amplia a recuperação pendente.
+- Entrega confirmada limpa marcadores pendentes.
+- Marcador-only pode ser reenviado sem eventos novos.
+
+SINTAXE NATIVA
+PASS g++ -std=c++17 -fsyntax-only evdev_capture.cpp com headers JNI/Linux.
+PASS g++ -std=c++17 -fsyntax-only uinput_touch.cpp com headers JNI/Linux.
+
+CONFIGURAÇÃO/EMBALAGEM
+PASS versionName 0.14.42 / versionCode 58 / artifact keymapper-0.14.42-debug consistentes.
+PASS YAML do GitHub Actions parseável.
+PASS raiz Gradle na raiz do ZIP.
+PASS ZIP íntegro e SHA-256 conferido.
+PASS scripts native-tests/run.sh e check-syntax.sh executáveis.
+
+BUILD ANDROID
+Tentativa de ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace --console=plain.
+Bloqueio: Wrapper não conseguiu resolver services.gradle.org (UnknownHostException). ANDROID_HOME e ANDROID_SDK_ROOT ausentes. Não foi executado AGP, Android Lint, NDK/CMake sob Android, assembleDebug ou gerado APK.
+
+PENDÊNCIAS FÍSICAS
+- Falha real de alocação/cópia/callback JNI e recuperação via Binder.
+- Desconexão de mouse/teclado durante DOWN.
+- Funcionamento do Sight/Aim e Nonstop em jogos específicos.
+- Samsung Note 20 Ultra, Android 13, One UI e DeX.
+- Medição ponta a ponta de latência, jitter e perdas a 1000 Hz.
