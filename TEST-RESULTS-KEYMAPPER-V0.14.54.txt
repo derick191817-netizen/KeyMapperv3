@@ -1,0 +1,22 @@
+KeyMapper 0.14.54 — Resultados de validação
+
+PASS
+- Compilação isolada de HudPlacementPolicy.kt com kotlinc-jvm 1.9.0 (JRE 21).
+- Harness Kotlin: canvas vazio mantém centro preferido.
+- Harness Kotlin: novo controle evita o centro ocupado.
+- Harness Kotlin: raio permanece dentro dos limites da área.
+- Harness Kotlin: geometria não finita/inválida retorna fallback seguro.
+- Harness Kotlin: círculos ocupados inválidos são ignorados.
+- Cinco métodos de teste do arquivo JUnit compilados e executados em harness JVM com uma implementação mínima local das assinaturas de Assert/Test; isso valida os corpos e as asserções, mas não substitui a execução pelo runner JUnit/Gradle oficial.
+- `check-hud-placement-policy.sh`: PASS; a regra está integrada apenas nos caminhos de controle padrão (add/duplicate); os tipos especializados permanecem sem alteração e a barreira está no GitHub Actions.
+- `check-toolchain-compatibility.py`: PASS para AGP 8.5.2, Kotlin/Compose 2.4.21, Gradle 8.8, JDK/JVM 17, SDK 34, NDK 26.3.11579264, CMake 3.22.1 e versão 70/0.14.54.
+- `test-toolchain-compatibility.py`: PASS; quatro cenários negativos foram rejeitados como esperado.
+- YAML do workflow parseado com PyYAML e identidade de versão/artefato confirmada.
+
+PENDENTE
+- `:app:testDebugUnitTest`, `:app:lintDebug` e `:app:assembleDebug`: tentativa local falhou antes de iniciar o Gradle porque `services.gradle.org` não foi resolvido por DNS.
+- Teste físico Android 13 / Samsung One UI / Samsung DeX / mouse e teclado conectados: não executado.
+- Validação da seleção e persistência em janelas/display externos: não executada em dispositivo.
+- Nenhum APK foi gerado nesta etapa.
+
+Observação: o harness direto compila e executa a política pura. Não equivale à compilação de todo o aplicativo Android nem à execução dos testes JUnit via Gradle.

@@ -31,11 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.keymapper.injection.DiscoveredAdbEndpoint
 import com.example.keymapper.injection.WirelessAdbClient
-import com.flyfishxu.kadb.mdns.KadbMdnsAndroid
-import com.flyfishxu.kadb.mdns.MdnsConfig
-import com.flyfishxu.kadb.mdns.MdnsEndpoint
-import com.flyfishxu.kadb.mdns.MdnsServiceType
+import com.example.keymapper.injection.WirelessAdbDiscoveryFactory
+import com.example.keymapper.injection.WirelessAdbDiscoveryPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -57,23 +56,19 @@ fun WirelessAdbDialog(onDismiss: () -> Unit) {
     var connecting by remember { mutableStateOf(false) }
     var discovering by remember { mutableStateOf(false) }
     var clearingIdentity by remember { mutableStateOf(false) }
-    var pairEndpoints by remember { mutableStateOf<List<MdnsEndpoint>>(emptyList()) }
-    var connectEndpoints by remember { mutableStateOf<List<MdnsEndpoint>>(emptyList()) }
+    var pairEndpoints by remember { mutableStateOf<List<DiscoveredAdbEndpoint>>(emptyList()) }
+    var connectEndpoints by remember { mutableStateOf<List<DiscoveredAdbEndpoint>>(emptyList()) }
     val operationBusy = pairing || connecting || discovering || clearingIdentity
 
     LaunchedEffect(discovering) {
         if (!discovering) return@LaunchedEffect
-        val discovery = KadbMdnsAndroid(
-            context.applicationContext,
-            MdnsConfig(serviceTypes = setOf(MdnsServiceType.TLS_CONNECT, MdnsServiceType.TLS_PAIRING))
-        )
+        val discovery = WirelessAdbDiscoveryFactory.create(context.applicationContext)
         var collector: Job? = null
         try {
             collector = launch {
-                discovery.state.collect { state ->
-                    pairEndpoints = state.pairDevices
-                    // Não expõe ADB legado sem TLS como endpoint selecionável.
-                    connectEndpoints = state.connectDevices.filter { it.serviceType == MdnsServiceType.TLS_CONNECT }
+                discovery.updates.collect { snapshot ->
+                    pairEndpoints = WirelessAdbDiscoveryPolicy.sanitize(snapshot.pairingEndpoints)
+                    connectEndpoints = WirelessAdbDiscoveryPolicy.sanitize(snapshot.connectionEndpoints)
                 }
             }
             discovery.start()
@@ -99,7 +94,7 @@ fun WirelessAdbDialog(onDismiss: () -> Unit) {
             .apply()
     }
 
-    fun selectEndpoint(endpoint: MdnsEndpoint, isPairing: Boolean) {
+    fun selectEndpoint(endpoint: DiscoveredAdbEndpoint, isPairing: Boolean) {
         host = endpoint.host
         if (isPairing) pairingPort = endpoint.port.toString() else connectionPort = endpoint.port.toString()
         persistEndpoint()
@@ -288,7 +283,7 @@ fun WirelessAdbDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun EndpointRow(endpoint: MdnsEndpoint, action: String, enabled: Boolean, onClick: () -> Unit) {
+private fun EndpointRow(endpoint: DiscoveredAdbEndpoint, action: String, enabled: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
         color = MaterialTheme.colorScheme.surfaceVariant,

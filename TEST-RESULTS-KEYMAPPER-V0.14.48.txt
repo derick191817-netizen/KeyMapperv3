@@ -1,0 +1,16 @@
+KEYMAPPER 0.14.48 — RESULTADO DAS VERIFICAÇÕES
+
+Falha original: Could not find com.flyfishxu:kadb-mdns:2.1.5.
+Correção: com.flyfishxu:kadb-mdns:2.1.4; kadb core permanece 2.1.5.
+
+PASS: settings.gradle.kts contém mavenCentral() em dependencyResolutionManagement.
+PASS: imports e APIs KadbMdnsAndroid/MdnsConfig/MdnsEndpoint/MdnsServiceType preservados.
+PASS: script check-kadb-coordinates.sh.
+PASS: teste C++ host de recuperação JNI.
+PASS: sintaxe C++ de evdev_capture.cpp e uinput_touch.cpp.
+PASS: contrato CMake/JNI/nome da biblioteca/sondagem.
+PASS: YAML do workflow parseável.
+PASS: versionName 0.14.48 / versionCode 64 / artefato keymapper-0.14.48-debug coerentes.
+PASS: não há ocorrência da coordenada kadb-mdns:2.1.5 no arquivo de build.
+
+NÃO EXECUTADO: resolução real de dependências Gradle/Maven, Android Lint, compileDebugAidl, testDebugUnitTest, assembleDebug e execução em aparelho. O ambiente desta sessão não resolve hosts externos e não tem distribuição Gradle/Android SDK configurados para concluir o build.

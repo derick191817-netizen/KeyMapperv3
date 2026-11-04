@@ -1,0 +1,34 @@
+KeyMapper 0.14.51 — relatório de validação
+
+TESTES DA POLÍTICA ADB mDNS (kotlinc, harness independente)
+PASS — trim de host/nome e fallback do nome pelo host
+PASS — rejeição de host vazio
+PASS — rejeição de host com whitespace
+PASS — rejeição de porta zero e acima de 65535
+PASS — deduplicação case-insensitive por host+porta preservando primeira ocorrência
+PASS — hosts diferentes com a mesma porta são preservados
+PASS — limite padrão de 8; limites zero e negativos retornam vazio
+Resultado: 7 cenários aprovados.
+
+CONTRATOS E TESTES NATIVOS
+PASS — tools/native-tests/run.sh
+PASS — tools/native-tests/check-syntax.sh
+PASS — tools/native-tests/check-library-contract.sh
+PASS — tools/dependency-tests/check-kadb-coordinates.sh
+PASS — tools/architecture-tests/check-wireless-adb-boundary.sh
+PASS — YAML de .github/workflows/build.yml
+PASS — versionCode=67 / versionName=0.14.51 / artifact keymapper-0.14.51-debug
+PASS — compilerOptions JVM 17; sem kotlinOptions legado
+PASS — estrutura de projeto, ZIP e SHA-256
+
+NÃO EXECUTADO
+- :app:testDebugUnitTest via Gradle
+- :app:lintDebug
+- :app:assembleDebug
+- Resolução da dependência AAR pelo Gradle em execução real
+- Descoberta mDNS em Wi-Fi físico e ADB TLS no Android 13 / Samsung DeX
+
+Motivo: `bash ./gradlew --no-daemon :app:testDebugUnitTest --stacktrace --console=plain` parou antes de baixar/iniciar Gradle 8.8 com `UnknownHostException: services.gradle.org`.
+
+APK: NÃO GERADO.
+GitHub main: não alterado nesta execução.

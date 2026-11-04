@@ -21,6 +21,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validar matriz do toolchain Android
+        run: python3 ./tools/build-tests/check-toolchain-compatibility.py
+
+      - name: Testar falhas do verificador do toolchain
+        run: python3 ./tools/build-tests/test-toolchain-compatibility.py
+
       - name: Configurar JDK 17
         uses: actions/setup-java@v4
         with:
@@ -45,6 +51,11 @@ jobs:
           bash ./tools/native-tests/run.sh
           bash ./tools/native-tests/check-syntax.sh
           bash ./tools/native-tests/check-library-contract.sh
+          bash ./tools/dependency-tests/check-kadb-coordinates.sh
+          bash ./tools/architecture-tests/check-wireless-adb-boundary.sh
+          bash ./tools/architecture-tests/check-shizuku-session-isolation.sh
+          bash ./tools/architecture-tests/check-hud-placement-policy.sh
+          bash ./tools/architecture-tests/check-overlay-window-placement.sh
 
       - name: Executar análise estática Android (Lint)
         run: ./gradlew --no-daemon :app:lintDebug --stacktrace --console=plain
@@ -58,7 +69,7 @@ jobs:
       - name: Publicar APK Debug
         uses: actions/upload-artifact@v4
         with:
-          name: keymapper-0.14.47-debug
+          name: keymapper-0.14.55-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

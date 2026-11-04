@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.keymapper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 63
-        versionName = "0.14.47"
+        versionCode = 71
+        versionName = "0.14.55"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {
@@ -94,9 +94,10 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
 
-    // Cliente ADB TLS independente do Shizuku: pareamento por código, conexão e descoberta mDNS.
+    // Cliente ADB TLS independente do Shizuku. O core 2.1.5 foi publicado no Maven Central.
     implementation("com.flyfishxu:kadb:2.1.5")
-    implementation("com.flyfishxu:kadb-mdns:2.1.5")
+    // Maven Central confirma o módulo raiz mDNS até 2.1.3. O 2.1.4/2.1.5 não foi resolvido pelo runner.
+    implementation("com.flyfishxu:kadb-mdns-android:2.1.3")
 
     testImplementation("junit:junit:4.13.2")
 }

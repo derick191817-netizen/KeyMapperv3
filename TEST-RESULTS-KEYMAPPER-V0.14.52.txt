@@ -1,0 +1,18 @@
+KeyMapper 0.14.52 — Resultados de validação
+
+Validações executadas nesta versão:
+- `tools/build-tests/check-toolchain-compatibility.py`: PASS (AGP 8.5.2, Kotlin/Compose 2.4.21, Gradle 8.8, JDK/JVM 17, SDK 34, NDK 26.3.11579264, CMake 3.22.1, versionCode fixado e versionName alinhado ao artefato).
+- `tools/build-tests/test-toolchain-compatibility.py`: PASS (4 cenários negativos: Compose desalinhado, Gradle insuficiente, NDK ausente e artefato divergente).
+- `tools/native-tests/run.sh`: PASS.
+- `tools/native-tests/check-syntax.sh`: PASS.
+- `tools/native-tests/check-library-contract.sh`: PASS.
+- `tools/dependency-tests/check-kadb-coordinates.sh`: PASS.
+- `tools/architecture-tests/check-wireless-adb-boundary.sh`: PASS.
+- Alinhamento textual do workflow, artefato e versionCode/versionName: PASS.
+
+Limites:
+- `:app:lintDebug`, `:app:testDebugUnitTest` e `:app:assembleDebug` não foram executados nesta etapa.
+- Nenhum APK foi gerado ou instalado em dispositivo físico nesta etapa.
+
+Tentativa Gradle nesta execução:
+- `bash ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug`: BLOQUEADA antes de iniciar Gradle por `UnknownHostException: services.gradle.org`.

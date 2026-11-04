@@ -25,6 +25,7 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
         Thread(task, "keymapper-evdev-bridge").apply { isDaemon = true }
     }
     private val active = AtomicBoolean(false)
+    private val sessionEpoch = SessionEpoch()
     private val virtualTouchRecoveryRunning = AtomicBoolean(false)
     @Volatile private var lastVirtualTouchRecoveryAtMs = 0L
 
@@ -76,18 +77,31 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
         }
     }
 
-    private val inputCallback = object : IKeyMapperInputCallback.Stub() {
-        override fun onInputEvents(records: LongArray) {
-            if (active.get() && records.isNotEmpty()) onEvents?.invoke(records)
-        }
+    @Volatile private var inputCallback: IKeyMapperInputCallback? = null
 
-        override fun onCaptureState(mouseDevices: Int, keyboardDevices: Int, enabled: Boolean, detail: String?) {
-            if (active.get()) onState?.invoke(
-                mouseDevices.coerceAtLeast(0), keyboardDevices.coerceAtLeast(0), enabled,
-                detail ?: "Backend nativo sem detalhes"
-            )
+    /** Cada Binder recebe um callback associado à sessão que o criou. */
+    private fun createInputCallback(sessionToken: Long): IKeyMapperInputCallback =
+        object : IKeyMapperInputCallback.Stub() {
+            override fun onInputEvents(records: LongArray) {
+                if (active.get() && sessionEpoch.isCurrent(sessionToken) && records.isNotEmpty()) {
+                    onEvents?.invoke(records)
+                }
+            }
+
+            override fun onCaptureState(
+                mouseDevices: Int,
+                keyboardDevices: Int,
+                enabled: Boolean,
+                detail: String?
+            ) {
+                if (active.get() && sessionEpoch.isCurrent(sessionToken)) {
+                    onState?.invoke(
+                        mouseDevices.coerceAtLeast(0), keyboardDevices.coerceAtLeast(0), enabled,
+                        detail ?: "Backend nativo sem detalhes"
+                    )
+                }
+            }
         }
-    }
 
     fun start(
         context: Context,
@@ -102,6 +116,7 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
             onState = state
             onTouchOutputState = touchOutputState
             requestedEnabled = initiallyEnabled
+            inputCallback = createInputCallback(sessionEpoch.begin())
             active.set(true)
             registerLifecycleListeners()
             val connected = remote
@@ -340,10 +355,13 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
     private fun startRemoteCapture(service: IKeyMapperShellService, enabled: Boolean) {
         requestedEnabled = enabled
         if (captureStarting) return
+        val sessionToken = sessionEpoch.currentToken()
+        val callback = inputCallback ?: return
+        if (!active.get() || !sessionEpoch.isCurrent(sessionToken)) return
         captureStarting = true
         virtualTouchRecoveryRunning.set(true)
         worker.execute {
-            val result = runCatching { service.startInputCapture(inputCallback, enabled) }
+            val result = runCatching { service.startInputCapture(callback, enabled) }
             // A saída touchscreen é sondada separadamente: a captura evdev pode falhar e
             // ainda assim o sistema pode permitir uinput, ou o inverso.
             val touchOpen = runCatching { service.openVirtualTouch(32) }
@@ -352,10 +370,11 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
                 "Não foi possível consultar uinput: ${it.javaClass.simpleName}: ${it.message}"
             }
             main.post {
+                // Um worker da sessão anterior não pode liberar o lock de recuperação de uma
+                // sessão nova. Só o proprietário ainda válido limpa o seu estado compartilhado.
+                if (!active.get() || !sessionEpoch.isCurrent(sessionToken) || remote !== service) return@post
                 virtualTouchRecoveryRunning.set(false)
-                // Ignora resultado tardio de um serviço que já foi desconectado ou encerrado.
-                if (!active.get() || remote !== service) return@post
-                publishVirtualTouchState(touchOpen.getOrDefault(false), touchDetail)
+                publishVirtualTouchState(touchOpen.getOrDefault(false), touchDetail, sessionToken)
                 captureStarting = false
                 captureStarted = result.getOrDefault(false)
                 reconnectAttempts = UserServiceReconnectPolicy.afterCaptureStart(
@@ -384,10 +403,19 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
         }
     }
 
-    private fun publishVirtualTouchState(ready: Boolean, detail: String) {
+    private fun publishVirtualTouchState(
+        ready: Boolean,
+        detail: String,
+        sessionToken: Long = sessionEpoch.currentToken()
+    ) {
+        if (!active.get() || !sessionEpoch.isCurrent(sessionToken)) return
         virtualTouchReady = ready
         val callback = onTouchOutputState ?: return
-        main.post { callback(ready, detail) }
+        main.post {
+            if (active.get() && sessionEpoch.isCurrent(sessionToken) && onTouchOutputState === callback) {
+                callback(ready, detail)
+            }
+        }
     }
 
     override fun isAvailable(): Boolean {
@@ -400,6 +428,7 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
     /** Reabre o touchscreen virtual após falha do descritor, com serialização e cooldown. */
     private fun requestVirtualTouchRecovery(service: IKeyMapperShellService) {
         if (!active.get() || remote !== service || virtualTouchReady) return
+        val sessionToken = sessionEpoch.currentToken()
         val now = android.os.SystemClock.elapsedRealtime()
         if (now - lastVirtualTouchRecoveryAtMs < 5_000L) return
         if (!virtualTouchRecoveryRunning.compareAndSet(false, true)) return
@@ -411,8 +440,8 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
                 "Falha consultando uinput após recuperação: ${it.javaClass.simpleName}: ${it.message}"
             }
             main.post {
+                if (!active.get() || !sessionEpoch.isCurrent(sessionToken) || remote !== service) return@post
                 virtualTouchRecoveryRunning.set(false)
-                if (!active.get() || remote !== service) return@post
                 if (opened.exceptionOrNull() is RemoteException || detailResult.exceptionOrNull() is RemoteException) {
                     handleRemoteFailure(service, "Binder falhou ao recuperar touchscreen virtual")
                     return@post
@@ -434,20 +463,22 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
         pointerYs: FloatArray
     ): Boolean {
         val service = remote ?: return false
-        if (!active.get() || !virtualTouchReady) return false
+        val sessionToken = sessionEpoch.currentToken()
+        if (!active.get() || !sessionEpoch.isCurrent(sessionToken) || !virtualTouchReady) return false
         return try {
             val accepted = service.sendVirtualTouchFrame(
                 actionMasked, actionIndex, pointerCount, pointerIds, pointerXs, pointerYs
             )
+            if (!active.get() || !sessionEpoch.isCurrent(sessionToken) || remote !== service) return false
             if (!accepted && !runCatching { service.isVirtualTouchOpen() }.getOrDefault(false)) {
                 val detail = runCatching { service.virtualTouchStatus() }
                     .getOrDefault("uinput deixou de estar aberto")
-                publishVirtualTouchState(false, detail)
+                publishVirtualTouchState(false, detail, sessionToken)
             }
             accepted
         } catch (t: Throwable) {
             Log.w(TAG, "Falha no transporte AIDL do touchscreen uinput", t)
-            publishVirtualTouchState(false, "Transporte uinput caiu: ${t.javaClass.simpleName}: ${t.message}")
+            publishVirtualTouchState(false, "Transporte uinput caiu: ${t.javaClass.simpleName}: ${t.message}", sessionToken)
             if (t is RemoteException) handleRemoteFailure(service, "Binder falhou no touchscreen virtual")
             false
         }
@@ -455,18 +486,20 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
 
     override fun releaseAll(): Boolean {
         val service = remote ?: return false
-        if (!active.get() || !virtualTouchReady) return false
+        val sessionToken = sessionEpoch.currentToken()
+        if (!active.get() || !sessionEpoch.isCurrent(sessionToken) || !virtualTouchReady) return false
         return try {
             val released = service.releaseVirtualTouch()
+            if (!active.get() || !sessionEpoch.isCurrent(sessionToken) || remote !== service) return false
             if (!runCatching { service.isVirtualTouchOpen() }.getOrDefault(false)) {
                 val detail = runCatching { service.virtualTouchStatus() }
                     .getOrDefault("uinput deixou de estar aberto")
-                publishVirtualTouchState(false, detail)
+                publishVirtualTouchState(false, detail, sessionToken)
             }
             released
         } catch (t: Throwable) {
             Log.w(TAG, "Falha liberando contatos uinput via AIDL", t)
-            publishVirtualTouchState(false, "Não foi possível liberar uinput: ${t.javaClass.simpleName}")
+            publishVirtualTouchState(false, "Não foi possível liberar uinput: ${t.javaClass.simpleName}", sessionToken)
             if (t is RemoteException) handleRemoteFailure(service, "Binder falhou ao liberar touchscreen virtual")
             false
         }
@@ -545,7 +578,13 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
     }
 
     fun stop() {
+        // Invalidate immediately on the caller thread. Binder callbacks arriving before the
+        // main-thread cleanup is queued must already be rejected.
+        sessionEpoch.invalidate()
+        active.set(false)
         main.post {
+            // A start queued before this cleanup must not leave its callback generation valid.
+            sessionEpoch.invalidate()
             active.set(false)
             cancelReconnect()
             unregisterLifecycleListeners()
@@ -563,6 +602,8 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
             requestedEnabled = false
             virtualTouchReady = false
             virtualTouchRecoveryRunning.set(false)
+            lastVirtualTouchRecoveryAtMs = 0L
+            inputCallback = null
             onEvents = null
             onState = null
             onTouchOutputState = null

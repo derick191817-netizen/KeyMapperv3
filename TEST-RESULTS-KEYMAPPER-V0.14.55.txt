@@ -1,0 +1,25 @@
+KeyMapper 0.14.55 — resultados de validação
+
+PASS
+- OverlayWindowPlacementPolicy.kt compilado com kotlinc-jvm 1.9.0.
+- Cinco cenários Kotlin executados: painel paisagem esquerda/direita, retrato topo/baixo, display pequeno, entradas inválidas e display 1×1.
+- check-overlay-window-placement.sh: contrato de integração, posição absoluta e testes presentes.
+- check-hud-placement-policy.sh: criação/duplicação genérica de HUD protegidas.
+- check-shizuku-session-isolation.sh: callbacks isolados por epoch de sessão.
+- check-wireless-adb-boundary.sh: UI separada do fornecedor mDNS.
+- check-kadb-coordinates.sh: dependências e versionamento consistentes.
+- check-toolchain-compatibility.py: AGP 8.5.2, Kotlin/Compose 2.4.21, Gradle 8.8, JDK/JVM 17, SDK 34, NDK e CMake.
+- test-toolchain-compatibility.py: quatro falhas simuladas rejeitadas.
+- tools/native-tests/run.sh: testes host evdev/JNI.
+- tools/native-tests/check-syntax.sh: sintaxe C++17.
+- tools/native-tests/check-library-contract.sh: contrato CMake/JNI/diagnóstico.
+- YAML/versão/artefato conferidos; ZIP testado e SHA-256 gerado.
+
+PENDENTE
+- Gradle Wrapper tentou baixar Gradle 8.8, mas falhou antes de iniciar por UnknownHostException: services.gradle.org.
+- :app:testDebugUnitTest, :app:lintDebug e :app:assembleDebug não executados com sucesso.
+- Nenhum APK compilado.
+- Nenhum teste físico Android 13 / Samsung One UI / DeX.
+- Insets de sistema, recortes e IME ainda precisam de validação física.
+
+Conclusão: as políticas e contratos independentes foram validados; não se declara build Android completo nem validação em dispositivo.

@@ -17,6 +17,7 @@ import com.example.keymapper.data.Mode
 import com.example.keymapper.data.displayName
 import com.example.keymapper.data.keyLabel
 import com.example.keymapper.domain.MappingEditorPolicy
+import com.example.keymapper.domain.HudPlacementPolicy
 import com.example.keymapper.util.Haptics
 import kotlin.math.hypot
 import kotlin.math.min
@@ -534,7 +535,27 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             ).show()
             0
         }
-        mutate { it.copy(buttons = it.buttons + HudButton(id, assignedKey, 0.5f, 0.5f, kind = kind, name = name)) }
+        updateArea()
+        // A política nova melhora somente controles padrão de uso geral. Tipos especializados
+        // permanecem no comportamento legado e não recebem automação ou assistência adicional.
+        val placement = if (kind == Kind.STANDARD) {
+            findFreeButtonPosition(
+                settings = current,
+                candidateRadiusPx = 0.07f * current.buttonScale * am() / 2f
+            )
+        } else {
+            HudPlacementPolicy.Point(0.5f, 0.5f)
+        }
+        mutate {
+            it.copy(buttons = it.buttons + HudButton(
+                id = id,
+                key = assignedKey,
+                x = placement.x,
+                y = placement.y,
+                kind = kind,
+                name = name
+            ))
+        }
         selected = id
         armed = false
         armedKind = Kind.STANDARD
@@ -569,12 +590,28 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             Toast.makeText(context, "Não foi possível reservar um ID para o controle duplicado.", Toast.LENGTH_SHORT).show()
             return
         }
+        updateArea()
         val r = radius(original, s)
+        val legacyPreferred = HudPlacementPolicy.Point(
+            MappingEditorPolicy.boundedCenter(original.x + 0.045f, r / aW.coerceAtLeast(1f)),
+            MappingEditorPolicy.boundedCenter(original.y + 0.045f, r / aH.coerceAtLeast(1f))
+        )
+        val placement = if (original.kind == Kind.STANDARD) {
+            findFreeButtonPosition(
+                settings = s,
+                candidateRadiusPx = r,
+                excludedControlId = original.id,
+                preferred = legacyPreferred
+            )
+        } else {
+            // Mantém a geometria anterior dos tipos especializados, sem ampliá-los nesta etapa.
+            legacyPreferred
+        }
         val duplicate = original.copy(
             id = id,
             key = 0, // duplicar não deve criar conflito nem disparar uma ação sem confirmação
-            x = MappingEditorPolicy.boundedCenter(original.x + 0.045f, r / aW.coerceAtLeast(1f)),
-            y = MappingEditorPolicy.boundedCenter(original.y + 0.045f, r / aH.coerceAtLeast(1f)),
+            x = placement.x,
+            y = placement.y,
             name = (original.displayName() + " cópia").take(64),
             shootKey = if (original.kind == Kind.AIM) 0 else original.shootKey,
             linkAimId = if (original.kind == Kind.FIRE) -1 else original.linkAimId
@@ -585,6 +622,41 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         host.persist()
         Haptics.tick(this)
         invalidate()
+    }
+
+    /**
+     * Selects a safe, visible position for a new or duplicated control. It considers existing
+     * HUD controls and the movement joystick, but does not treat the free-look viewport as an
+     * occupied button because ordinary controls are allowed to live inside that region.
+     */
+    private fun findFreeButtonPosition(
+        settings: AppSettings,
+        candidateRadiusPx: Float,
+        excludedControlId: Int? = null,
+        preferred: HudPlacementPolicy.Point = HudPlacementPolicy.Point(0.5f, 0.5f)
+    ): HudPlacementPolicy.Point {
+        val occupied = ArrayList<HudPlacementPolicy.OccupiedCircle>(settings.buttons.size + 1)
+        settings.buttons.asSequence()
+            .filter { it.id != excludedControlId }
+            .forEach { button ->
+                occupied += HudPlacementPolicy.OccupiedCircle(
+                    x = button.x,
+                    y = button.y,
+                    radiusPx = radius(button, settings)
+                )
+            }
+        occupied += HudPlacementPolicy.OccupiedCircle(
+            x = settings.joyX,
+            y = settings.joyY,
+            radiusPx = settings.joyR * am()
+        )
+        return HudPlacementPolicy.findPosition(
+            widthPx = aW,
+            heightPx = aH,
+            candidateRadiusPx = candidateRadiusPx,
+            occupied = occupied,
+            preferred = preferred
+        )
     }
 
     private fun delete() {

@@ -1,0 +1,28 @@
+KeyMapper 0.14.50 — relatório de validação
+
+DEPENDÊNCIAS
+PASS — Kadb core: com.flyfishxu:kadb:2.1.5
+PASS — mDNS Android: com.flyfishxu:kadb-mdns-android:2.1.3
+PASS — Maven Central permanece configurado em settings.gradle.kts
+PASS — imports da API Android conferidos contra a fonte oficial tag 2.1.3
+PASS — ferramenta de preflight tools/dependency-tests/check-kadb-coordinates.sh
+
+VALIDAÇÃO LOCAL
+PASS — tools/native-tests/run.sh
+PASS — tools/native-tests/check-syntax.sh
+PASS — tools/native-tests/check-library-contract.sh
+PASS — YAML de .github/workflows/build.yml
+PASS — versionCode=66 / versionName=0.14.50 / artefato keymapper-0.14.50-debug
+PASS — estrutura do ZIP e SHA-256
+
+NÃO EXECUTADO
+- Gradle :app:dependencies --configuration debugCompileClasspath
+- :app:lintDebug
+- :app:testDebugUnitTest via Gradle
+- :app:assembleDebug
+- instalação/testes físicos Android 13 / Samsung DeX
+
+Motivo: esta execução não dispõe da distribuição Gradle 8.8 em cache e não consegue resolver services.gradle.org ou repo.maven.apache.org. A coordenada foi verificada no catálogo oficial do Maven Central, mas a resolução efetiva precisa ser confirmada no runner do GitHub Actions.
+
+APK: NÃO GERADO.
+GitHub main: NÃO ALTERADO por esta execução; a integração de gravação foi recusada anteriormente com HTTP 403.

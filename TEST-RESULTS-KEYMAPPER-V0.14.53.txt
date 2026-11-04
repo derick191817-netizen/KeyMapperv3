@@ -1,0 +1,18 @@
+KeyMapper 0.14.53 — Resultados de validação
+
+PASS
+- `tools/build-tests/check-toolchain-compatibility.py` — AGP 8.5.2, Kotlin/Compose 2.4.21, Gradle 8.8, JDK/JVM 17, SDK 34, NDK 26.3.11579264, CMake 3.22.1, versão 69/0.14.53 e artefato alinhado.
+- `tools/build-tests/test-toolchain-compatibility.py` — quatro cenários negativos.
+- `tools/native-tests/run.sh` — recuperação host de lotes evdev/JNI.
+- `tools/native-tests/check-syntax.sh` — sintaxe C++ dos fontes nativos.
+- `tools/native-tests/check-library-contract.sh` — contrato CMake/JNI/biblioteca empacotada.
+- `tools/dependency-tests/check-kadb-coordinates.sh` — coordenadas e versão do artefato.
+- `tools/architecture-tests/check-wireless-adb-boundary.sh` — desacoplamento da UI ADB.
+- `tools/architecture-tests/check-shizuku-session-isolation.sh` — callback por sessão, token e stop imediato.
+- `SessionEpoch.kt` compilado diretamente com kotlinc; harness JVM executou início, invalidação, troca de sessão e tokens inválidos.
+- `unzip -t` e SHA-256 do pacote final.
+
+PENDENTE / BLOQUEADO
+- `:app:lintDebug`, `:app:testDebugUnitTest` e `:app:assembleDebug`: não concluídos localmente.
+- Teste físico no Android 13/Samsung DeX e ciclo real de reconexão Shizuku: não executado.
+- Nenhum APK foi gerado nesta etapa.

@@ -423,25 +423,22 @@ class OverlayManager(
                 isFocusable = true
                 isFocusableInTouchMode = true
             }
-            val landscape = screen.width > screen.height
-            val width: Int
-            val height: Int
-            val gravity: Int
-            if (landscape) {
-                width = minOf((380 * dens).toInt(), (screen.width * 0.5f).toInt()).coerceAtLeast(1)
-                height = (screen.height * 0.96f).toInt().coerceAtLeast(1)
-                gravity = (if (b != null && b.x > 0.5f) Gravity.START else Gravity.END) or Gravity.CENTER_VERTICAL
-            } else {
-                width = minOf(screen.width, (560 * dens).toInt()).coerceAtLeast(1)
-                height = (screen.height * 0.6f).toInt().coerceAtLeast(1)
-                gravity = Gravity.CENTER_HORIZONTAL or (if (b != null && b.y > 0.5f) Gravity.TOP else Gravity.BOTTOM)
-            }
+            val placement = OverlayWindowPlacementPolicy.forControl(
+                screenWidthPx = screen.width,
+                screenHeightPx = screen.height,
+                density = dens,
+                controlX = b?.x ?: 0.5f,
+                controlY = b?.y ?: 0.5f
+            )
             val lp = WindowManager.LayoutParams(
-                width, height, WLP.TYPE_APPLICATION_OVERLAY,
+                placement.widthPx, placement.heightPx, WLP.TYPE_APPLICATION_OVERLAY,
                 WLP.FLAG_NOT_TOUCH_MODAL or WLP.FLAG_WATCH_OUTSIDE_TOUCH or hw(),
                 PixelFormat.TRANSLUCENT
             )
-            lp.gravity = gravity
+            // Posição absoluta TOP|LEFT: não depende da direção RTL nem da gravidade implícita.
+            lp.gravity = Gravity.TOP or Gravity.LEFT
+            lp.x = placement.xPx
+            lp.y = placement.yPx
             // Não force o teclado a ficar oculto: a janela deve aceitar foco e permitir que
             // cada EditText solicite o IME ao ser tocado.
             lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or

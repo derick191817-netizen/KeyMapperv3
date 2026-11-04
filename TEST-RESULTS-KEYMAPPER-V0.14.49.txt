@@ -1,0 +1,25 @@
+KeyMapper 0.14.49 — relatório de validação
+
+PASS — Coordenadas declaradas:
+  com.flyfishxu:kadb:2.1.5
+  com.flyfishxu:kadb-mdns:2.1.3
+  Maven Central presente em settings.gradle.kts
+
+PASS — tools/dependency-tests/check-kadb-coordinates.sh
+PASS — tools/native-tests/run.sh
+PASS — tools/native-tests/check-syntax.sh
+PASS — tools/native-tests/check-library-contract.sh
+PASS — Sintaxe YAML de .github/workflows/build.yml
+PASS — Consistência versionCode=65 / versionName=0.14.49 / artefato CI
+PASS — ZIP sem corrupção e com estrutura de projeto na raiz
+PASS — SHA-256 do ZIP
+
+NÃO EXECUTADO — Gradle :app:dependencies / resolução real de Maven.
+NÃO EXECUTADO — :app:lintDebug.
+NÃO EXECUTADO — :app:testDebugUnitTest via Gradle.
+NÃO EXECUTADO — :app:assembleDebug.
+NÃO GERADO — APK.
+
+Motivo das tarefas Gradle pendentes: este ambiente não tem Gradle instalado nem distribuição 8.8 em cache; o acesso DNS a services.gradle.org e repo.maven.apache.org falha. A existência da coordenada mDNS 2.1.3 foi conferida no catálogo Maven Central, mas a resolução efetiva deve ser confirmada pelo runner do GitHub Actions.
+
+GitHub remoto: não alterado. A integração recusou a gravação no repositório com HTTP 403; o ZIP completo contém as alterações para envio pelo proprietário do repositório.
