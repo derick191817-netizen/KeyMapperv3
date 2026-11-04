@@ -27,9 +27,9 @@ CASES = (
     (
         "Gradle abaixo do mínimo",
         "gradle/wrapper/gradle-wrapper.properties",
-        "gradle-8.8-bin.zip",
-        "gradle-8.6-bin.zip",
-        "diverge da combinação auditada",
+        "gradle-8.14.6-bin.zip",
+        "gradle-8.14.3-bin.zip",
+        "abaixo do mínimo 8.14.4",
     ),
     (
         "NDK ausente no runner",
@@ -41,7 +41,7 @@ CASES = (
     (
         "nome de artefato divergente",
         ".github/workflows/build.yml",
-        "keymapper-0.14.65-debug",
+        "keymapper-0.14.66-debug",
         "keymapper-0.14.54-debug",
         "nome do artefato CI",
     ),

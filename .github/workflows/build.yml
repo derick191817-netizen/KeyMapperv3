@@ -63,6 +63,7 @@ jobs:
           bash ./tools/architecture-tests/check-macro-sequence-contract.sh
           bash ./tools/architecture-tests/check-control-activation-ownership.sh
           bash ./tools/architecture-tests/check-settings-profile-recovery.sh
+          bash ./tools/architecture-tests/check-aidl-contract.sh
 
       - name: Confirmar versão Kadb Android resolvida
         run: bash ./tools/dependency-tests/verify-kadb-selected-version.sh
@@ -79,7 +80,7 @@ jobs:
       - name: Publicar APK Debug
         uses: actions/upload-artifact@v4
         with:
-          name: keymapper-0.14.65-debug
+          name: keymapper-0.14.66-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

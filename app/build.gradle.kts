@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.keymapper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 81
-        versionName = "0.14.65"
+        versionCode = 82
+        versionName = "0.14.66"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {

@@ -1,0 +1,58 @@
+KEYMAPPER 0.14.66 — PROJETO ANDROID COMPLETO
+============================================
+
+ESTE ZIP CONTÉM O PROJETO-FONTE COMPLETO, NÃO UM APK.
+A estrutura já está na raiz do arquivo: gradlew, settings.gradle.kts, build.gradle.kts,
+app/, gradle/, tools/, docs/ e .github/.
+
+ABRIR NO ANDROID STUDIO
+-----------------------
+1. Extraia o ZIP inteiro para uma pasta.
+2. No Android Studio, use File > Open e selecione a pasta extraída (a que contém
+   settings.gradle.kts e gradlew).
+3. Aguarde a sincronização do Gradle com acesso à internet.
+4. Use JDK 17. O projeto declara compileSdk 34, NDK 26.3.11579264 e CMake 3.22.1.
+5. Não copie o conteúdo para dentro de uma subpasta adicional nem abra somente app/.
+
+COMPILAR APK DEBUG
+------------------
+Linux/macOS/GitHub Actions:
+  chmod +x ./gradlew
+  ./gradlew --no-daemon :app:assembleDebug
+
+Windows:
+  gradlew.bat --no-daemon :app:assembleDebug
+
+Validar antes do APK:
+  ./gradlew --no-daemon :app:lintDebug
+  ./gradlew --no-daemon :app:testDebugUnitTest
+
+Saída esperada, somente após build bem-sucedido:
+  app/build/outputs/apk/debug/app-debug.apk
+
+DEPENDÊNCIAS E ACESSO À REDE
+----------------------------
+O Gradle precisa baixar sua distribuição e dependências. O projeto usa Google Maven,
+Maven Central e JitPack. O wrapper está configurado para Gradle 8.14.6.
+
+ESTADO REAL DESTA ENTREGA
+-------------------------
+- Projeto-fonte completo e arquivos de build incluídos.
+- Verificadores locais de toolchain, JNI/C++, EVDEV, dependências, AIDL, HUD, overlay,
+  macros, sessões e recuperação de perfis passaram no ambiente que gerou este pacote.
+- A compilação Android completa NÃO foi confirmada aqui: a tentativa falhou ao resolver
+  services.gradle.org (UnknownHostException), antes de o Gradle iniciar. Portanto este
+  ZIP não inclui APK e não deve ser tratado como artefato instalável.
+- A integração Wireless ADB ainda não substitui o backend de entrada Shizuku de ponta a
+  ponta; o provedor root independente também não está implementado nesta versão.
+- O GitHub remoto não foi atualizado por esta sessão: a tentativa de criar uma branch
+  recebeu HTTP 403. O workflow .github/workflows/build.yml está incluído para execução
+  depois que o código for enviado ao repositório.
+
+VERSÃO
+------
+versionName: 0.14.66
+versionCode: 82
+
+A versão somente poderá ser considerada validada para instalação depois que lintDebug,
+testDebugUnitTest e assembleDebug concluírem com sucesso e o APK for testado em aparelho.

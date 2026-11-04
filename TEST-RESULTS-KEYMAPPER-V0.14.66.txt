@@ -1,0 +1,53 @@
+>>> python3 tools/build-tests/check-toolchain-compatibility.py
+[PASS] Matriz Kotlin/AGP/Gradle dentro das faixas verificadas
+[PASS] AGP 8.5.2 | Kotlin/Compose 2.4.21 | Gradle 8.14.6
+[PASS] JDK/JVM 17 | compileSdk 34 | NDK 26.3.11579264 | CMake 3.22.1
+[PASS] versionCode 82 | versionName 0.14.66 | artefato keymapper-0.14.66-debug
+>>> python3 tools/build-tests/test-toolchain-compatibility.py
+[PASS] Verificador rejeita: Compose desalinhado
+[PASS] Verificador rejeita: Gradle abaixo do mínimo
+[PASS] Verificador rejeita: NDK ausente no runner
+[PASS] Verificador rejeita: nome de artefato divergente
+>>> bash tools/dependency-tests/check-kadb-coordinates.sh
+PASS: Kadb Android AAR 2.1.4 + SPAKE2 via JitPack + mDNS Android AAR 2.1.3; adapter e CI consistentes.
+>>> bash tools/dependency-tests/check-jetifier-ignorelist.sh
+PASS: artefatos Bouncy Castle jdk18on são excluídos apenas da transformação Jetifier.
+>>> bash tools/dependency-tests/test-kadb-selected-version.sh
+PASS: verificador aceita Kadb 2.1.4 + BC 1.86 e rejeita versões incompatíveis/vulneráveis.
+>>> bash tools/architecture-tests/check-aidl-contract.sh
+PASS: contrato AIDL de serviço e callback está completo e importado explicitamente.
+>>> bash tools/architecture-tests/check-wireless-adb-boundary.sh
+PASS: fronteira UI -> contrato interno -> adaptador Kadb preservada.
+>>> bash tools/architecture-tests/check-shizuku-session-isolation.sh
+PASS: callbacks AIDL isolados por sessão; stop invalida a sessão antes do cleanup assíncrono.
+>>> bash tools/architecture-tests/check-session-start-idempotency.sh
+PASS: start() reutiliza o callback da sessão ativa e só cria novo epoch para lifecycle novo/recuperado.
+>>> bash tools/architecture-tests/check-hud-placement-policy.sh
+PASS: Tecla/Tiro/Mira creation and duplication use collision-aware placement; contract tests exist
+>>> bash tools/architecture-tests/check-overlay-window-placement.sh
+PASS: painel overlay tem dimensões/posição limitadas e testadas para retrato, paisagem e displays pequenos
+>>> bash tools/architecture-tests/check-visible-control-types.sh
+PASS: biblioteca Tap/Hold/Fire/WASD+Stick/Aim/Swipe/Macro, configurações, Combo, Rapid Tap e motor têm rotas verificáveis.
+>>> bash tools/architecture-tests/check-macro-sequence-contract.sh
+PASS: Macro sequencial tem modelo JSON isolado, passos limitados, destinos validados, execução serial, repetição finita e cancelamento; Combo permanece separado.
+>>> bash tools/architecture-tests/check-control-activation-ownership.sh
+PASS: contato compartilhado possui ownership por origem; Fire/Aim e soltura são independentes e testáveis.
+>>> bash tools/architecture-tests/check-settings-profile-recovery.sh
+PASS: profiles/buttons/games ausentes seguem compatíveis; null/tipo inválido é copiado para backup antes da sanitização.
+>>> bash tools/native-tests/run.sh
+PASS: evdev JNI batch recovery and keyboard HID classification host tests
+>>> bash tools/native-tests/check-syntax.sh
+PASS: evdev_capture.cpp and uinput_touch.cpp syntax
+>>> bash tools/native-tests/check-library-contract.sh
+PASS: CMake target, Kotlin loadLibrary name, packaged filename and diagnostic probe are consistent
+
+Build Android / Gradle:
+- Tentativa: ./gradlew --version --no-daemon --console=plain
+- Resultado: BLOQUEADO antes do Gradle iniciar; java.net.UnknownHostException: services.gradle.org
+- ANDROID_HOME e ANDROID_SDK_ROOT não estão configurados no ambiente local.
+- Portanto, lintDebug, testDebugUnitTest, assembleDebug e APK não foram executados/gerados.
+
+Publicação remota:
+- A leitura do repositório GitHub confirmou a base main 0.14.65.
+- A tentativa de criar branch de correção foi recusada com HTTP 403 (Resource not accessible by integration).
+- Nenhum arquivo remoto foi alterado.

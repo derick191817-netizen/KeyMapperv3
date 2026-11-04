@@ -20,9 +20,10 @@ for symbol in KadbMdnsAndroid MdnsConfig MdnsEndpoint MdnsServiceType; do
   grep -Fq "import com.flyfishxu.kadb.mdns.$symbol" "$ADAPTER"
 done
 grep -Fq 'mavenCentral()' "$SETTINGS"
-grep -Fq 'keymapper-0.14.65-debug' "$WORKFLOW"
-grep -Fq 'versionCode = 81' "$APP"
-grep -Fq 'versionName = "0.14.65"' "$APP"
-printf '%s\n' 'PASS: Kadb Android AAR 2.1.4 + mDNS Android AAR 2.1.3; adapter e CI consistentes.'
+grep -Fq 'https://jitpack.io' "$SETTINGS"
+grep -Fq 'keymapper-0.14.66-debug' "$WORKFLOW"
+grep -Fq 'versionCode = 82' "$APP"
+grep -Fq 'versionName = "0.14.66"' "$APP"
+printf '%s\n' 'PASS: Kadb Android AAR 2.1.4 + SPAKE2 via JitPack + mDNS Android AAR 2.1.3; adapter e CI consistentes.'
 
 # A política separada garante que Jetifier não tente analisar os JARs multi-release do Bouncy Castle.

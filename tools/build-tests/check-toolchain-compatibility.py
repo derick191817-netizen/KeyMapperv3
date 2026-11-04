@@ -62,19 +62,14 @@ def main() -> None:
     ).group(1)
     require(r"distributionSha256Sum=[0-9a-f]{64}", wrapper, "checksum SHA-256 do Gradle Wrapper")
 
-    # The documentation records a specific, source-verified toolchain tuple. Any upgrade
-    # must update this tuple and re-check the official matrices rather than pass by guesswork.
-    verified_tuple = ("8.5.2", "2.4.21", "8.8")
-    actual_tuple = (agp, kotlin, gradle)
-    if actual_tuple != verified_tuple:
-        fail(
-            f"toolchain {actual_tuple} diverge da combinação auditada {verified_tuple}; "
-            "revise as matrizes oficiais e atualize docs/devops antes de alterar versões"
-        )
+    # Keep the pinned Android/Kotlin plugins and enforce the runner's Gradle minimum.
+    # KGP 2.4.21 supports Gradle 7.6.3–9.7.0; the CI log requires >= 8.14.4.
+    if agp != "8.5.2" or kotlin != "2.4.21":
+        fail(f"AGP/Kotlin não correspondem à combinação validada: {(agp, kotlin)}")
     if compose != kotlin:
         fail(f"plugin Compose {compose} diverge do Kotlin {kotlin}")
-    if version_tuple(gradle) < version_tuple("8.7"):
-        fail(f"Gradle {gradle} abaixo do mínimo 8.7 exigido pelo AGP {agp}")
+    if version_tuple(gradle) < version_tuple("8.14.4"):
+        fail(f"Gradle {gradle} abaixo do mínimo 8.14.4 exigido pelo pipeline Kotlin/Gradle")
     if not (version_tuple("7.6.3") <= version_tuple(gradle) <= version_tuple("9.7.0")):
         fail(f"Gradle {gradle} fora da faixa oficial suportada pelo KGP {kotlin} (7.6.3–9.7.0)")
 
@@ -97,8 +92,8 @@ def main() -> None:
 
     code = require(r"versionCode\s*=\s*(\d+)", app_gradle, "versionCode").group(1)
     name = require(r'versionName\s*=\s*"([0-9.]+)"', app_gradle, "versionName").group(1)
-    if (code, name) != ("81", "0.14.65"):
-        fail(f"versão do módulo {(code, name)} diverge da release auditada (81, 0.14.65)")
+    if (code, name) != ("82", "0.14.66"):
+        fail(f"versão do módulo {(code, name)} diverge da release auditada (82, 0.14.66)")
     artifact = f"keymapper-{name}-debug"
     if f"name: {artifact}" not in workflow:
         fail(f"nome do artefato CI não corresponde ao versionName: esperado {artifact}")

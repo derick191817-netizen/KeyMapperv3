@@ -1,5 +1,7 @@
 package com.example.keymapper.injection;
 
+import com.example.keymapper.injection.IKeyMapperInputCallback;
+
 /**
  * Explicit Shizuku UserService contract. Transaction IDs 16777114 and 1 are reserved
  * by Shizuku for destroy()/exit(); existing inspectRuntime transaction remains 2.

@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Kadb 2.1.4 resolve SPAKE2 por esta coordenada publicada no JitPack.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
