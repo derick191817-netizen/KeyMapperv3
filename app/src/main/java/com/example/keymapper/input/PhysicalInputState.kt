@@ -4,17 +4,20 @@ import java.util.LinkedHashMap
 import java.util.LinkedHashSet
 
 /**
- * Estado físico agregado por dispositivo Android.
+ * Estado físico agregado por dispositivo.
  *
  * Uma tecla/botão só é encaminhado como DOWN quando nenhum dispositivo já o mantém pressionado,
- * e só gera UP quando o último dispositivo o solta. Isso evita que dois teclados/mouses disputem
- * o mesmo código lógico e que a remoção de um deles solte uma entrada ainda mantida pelo outro.
- * A instância pertence à thread de UI/CaptureView.
+ * e só gera UP quando o último dispositivo o solta. Use uma instância por origem de captura
+ * (por exemplo, MotionEvent Android ou evdev nativo). A classe não é thread-safe: o proprietário
+ * deve manter todas as operações na mesma thread.
  */
 class PhysicalInputState {
     private data class DeviceState(
         val heldKeys: LinkedHashSet<Int> = LinkedHashSet(),
-        var buttonMask: Int = 0
+        var buttonMask: Int = 0,
+        // Evdev pode expor códigos físicos diferentes que são normalizados para o mesmo bit.
+        // Guardar o código de origem impede que o UP de um alias solte o outro.
+        val heldButtonCodes: LinkedHashMap<Int, Int> = LinkedHashMap()
     )
 
     private val devices = LinkedHashMap<Int, DeviceState>()
@@ -54,20 +57,42 @@ class PhysicalInputState {
     fun updateButtons(deviceId: Int, nextMask: Int): Int {
         val previousGlobal = aggregateButtonMask()
         val state = devices.getOrPut(deviceId) { DeviceState() }
-        state.buttonMask = nextMask
+        state.buttonMask = nextMask and MouseButtonStatePolicy.KNOWN_BUTTON_MASK
         val changed = previousGlobal xor aggregateButtonMask()
+        removeIfEmpty(deviceId, state)
+        return changed
+    }
+
+    /**
+     * Aplica uma transição evdev rastreando o código Linux físico e o bit lógico Android.
+     * Vários códigos Linux podem ser normalizados para o mesmo bit (por exemplo BTN_SIDE e
+     * BTN_BACK). O UP de um código só libera o bit quando nenhum alias ou outro dispositivo
+     * continua mantendo o botão pressionado.
+     */
+    fun updateButtonCode(deviceId: Int, sourceCode: Int, buttonBit: Int, pressed: Boolean): Boolean {
+        val knownMask = MouseButtonStatePolicy.KNOWN_BUTTON_MASK
+        if (sourceCode <= 0 || buttonBit <= 0 || (buttonBit and (buttonBit - 1)) != 0 ||
+            (buttonBit and knownMask) != buttonBit
+        ) return false
+
+        val previousGlobal = aggregateButtonMask()
+        val state = devices.getOrPut(deviceId) { DeviceState() }
+        if (pressed) state.heldButtonCodes.putIfAbsent(sourceCode, buttonBit)
+        else state.heldButtonCodes.remove(sourceCode)
+        val changed = ((previousGlobal xor aggregateButtonMask()) and buttonBit) != 0
         removeIfEmpty(deviceId, state)
         return changed
     }
 
     /** Limpa somente um dispositivo e libera apenas entradas que nenhum outro ainda mantém. */
     fun clearDevice(deviceId: Int): Snapshot {
-        val removed = devices.remove(deviceId) ?: return Snapshot(0, intArrayOf())
+        val removed = devices[deviceId] ?: return Snapshot(0, intArrayOf())
+        val previousGlobalButtons = aggregateButtonMask()
         val remainingKeys = LinkedHashSet<Int>()
-        devices.values.forEach { remainingKeys.addAll(it.heldKeys) }
+        devices.forEach { (id, state) -> if (id != deviceId) remainingKeys.addAll(state.heldKeys) }
         val releasedKeys = removed.heldKeys.filter { it !in remainingKeys }.toIntArray()
-        val remainingButtons = aggregateButtonMask()
-        val releasedButtons = removed.buttonMask and remainingButtons.inv()
+        devices.remove(deviceId)
+        val releasedButtons = previousGlobalButtons and aggregateButtonMask().inv()
         return Snapshot(releasedButtons, releasedKeys)
     }
 
@@ -82,12 +107,17 @@ class PhysicalInputState {
 
     private fun aggregateButtonMask(): Int {
         var result = 0
-        devices.values.forEach { result = result or it.buttonMask }
+        devices.values.forEach { state ->
+            result = result or state.buttonMask
+            state.heldButtonCodes.values.forEach { result = result or it }
+        }
         return result
     }
 
     private fun removeIfEmpty(deviceId: Int, state: DeviceState) {
-        if (state.heldKeys.isEmpty() && state.buttonMask == 0) devices.remove(deviceId)
+        if (state.heldKeys.isEmpty() && state.buttonMask == 0 && state.heldButtonCodes.isEmpty()) {
+            devices.remove(deviceId)
+        }
     }
 
     data class Snapshot(val buttonMask: Int, val keyCodes: IntArray)

@@ -8,7 +8,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import com.example.keymapper.input.PointerSpeed
@@ -23,27 +25,83 @@ class QuickMenuView(
     private val onClose: () -> Unit
 ) : LinearLayout(ctx) {
 
-    private val gray = Color.rgb(35, 43, 49)
+    private val gray = Color.rgb(25, 42, 55)
+    private val accent = Color.rgb(112, 224, 206)
+    private val content = LinearLayout(ctx).apply { orientation = VERTICAL }
+    private val scroll = ScrollView(ctx).apply {
+        isFillViewport = false
+        isVerticalScrollBarEnabled = true
+        overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        addView(
+            content,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        )
+    }
 
     init {
         orientation = VERTICAL
         background = GradientDrawable().apply {
-            setColor(Color.argb(248, 14, 19, 23))
-            cornerRadius = dp(16).toFloat()
+            orientation = GradientDrawable.Orientation.TOP_BOTTOM
+            colors = intArrayOf(Color.rgb(16, 31, 42), Color.rgb(9, 16, 23))
+            setStroke(dp(1), Color.rgb(48, 78, 91))
+            cornerRadius = dp(20).toFloat()
         }
         setPadding(dp(12), dp(10), dp(12), dp(10))
+        addView(scroll, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         build()
     }
 
     private fun dp(v: Int) = (v * density).roundToInt()
 
+    /** Mede a janela com altura máxima; o conteúdo excedente permanece acessível por rolagem. */
+    fun measureForWindow(widthPx: Int, maxHeightPx: Int): Int {
+        val safeWidth = widthPx.coerceAtLeast(1)
+        val safeHeight = maxHeightPx.coerceAtLeast(1)
+        measure(
+            View.MeasureSpec.makeMeasureSpec(safeWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(safeHeight, View.MeasureSpec.AT_MOST)
+        )
+        return measuredHeight.coerceIn(1, safeHeight)
+    }
+
     private fun build() {
-        removeAllViews()
-        addRow(TextView(context).apply {
-            text = "Menu rápido"
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
+        content.removeAllViews()
+        addRow(LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dp(9), dp(8), dp(9), dp(8))
+            background = GradientDrawable().apply {
+                setColor(Color.rgb(24, 48, 60))
+                cornerRadius = dp(14).toFloat()
+            }
+            addView(TextView(context).apply {
+                text = "KM"
+                gravity = android.view.Gravity.CENTER
+                textSize = 12f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(Color.rgb(5, 29, 32))
+                background = GradientDrawable().apply {
+                    setColor(accent)
+                    cornerRadius = dp(10).toFloat()
+                }
+            }, LayoutParams(dp(38), dp(38)))
+            addView(LinearLayout(context).apply {
+                orientation = VERTICAL
+                setPadding(dp(10), 0, 0, 0)
+                addView(TextView(context).apply {
+                    text = "KEYMAPPER STUDIO"
+                    setTextColor(accent)
+                    textSize = 9f
+                    letterSpacing = 0.12f
+                    setTypeface(typeface, Typeface.BOLD)
+                })
+                addView(TextView(context).apply {
+                    text = "Menu rápido"
+                    setTextColor(Color.WHITE)
+                    textSize = 16f
+                    setTypeface(typeface, Typeface.BOLD)
+                })
+            }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         })
 
         addRow(btn(if (host.isPaused()) "Retomar mapeamento" else "Pausar mapeamento") {
@@ -156,9 +214,9 @@ class QuickMenuView(
     }
 
     private fun addRow(v: View) {
-        addView(
+        content.addView(
             v,
-            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { setMargins(0, dp(4), 0, dp(4)) }
         )
     }

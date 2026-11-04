@@ -213,6 +213,29 @@ object InputDiagnostics {
             "filaP95=${s.queueWaitP95Ms}ms; backend=${s.backend}"
     }
 
+    /**
+     * Diagnóstico operacional resumido para orientar a primeira verificação do usuário.
+     * Contadores são cumulativos desde a inicialização do processo; não representam garantia
+     * de que o jogo de destino tenha consumido os eventos.
+     */
+    fun healthHint(hasMouse: Boolean): String {
+        val s = snapshot()
+        return InputHealthHintPolicy.hint(
+            InputHealthState(
+                hasMouse = hasMouse,
+                captureRequested = s.captureRequested,
+                windowFocused = s.windowFocused,
+                captureConfirmed = s.captureConfirmed,
+                mouseReceived = s.mouseReceived,
+                mouseReceivedWithoutPointerCapture = s.mouseReceivedWithoutPointerCapture,
+                mouseProcessed = s.mouseProcessed,
+                mouseForwarded = s.mouseForwarded,
+                injectionSuccesses = s.injectionSuccesses,
+                injectionFailures = s.injectionFailures
+            )
+        )
+    }
+
     fun report(): String {
         val s = snapshot()
         return buildString {
@@ -222,7 +245,7 @@ object InputDiagnostics {
             appendLine("Backend de entrada/saída: ${s.backend}")
             appendLine("Modo de saída da visão: ${s.outputMode}")
             appendLine("Escopo de captura: Pointer Capture pertence à janela focada que o solicitou; não é captura global do mouse.")
-            appendLine("Acesso global a /dev/input e criação de uinput: não implementados nem validados nesta versão.")
+            appendLine("Captura evdev e saída touchscreen uinput são opcionais e dependem do UserService, kernel, UID e SELinux; consulte o status real abaixo.")
             appendLine("Permissão/serviço: ${s.permissionStatus}")
             appendLine("Dispositivos Android enumerados: ${s.inputDevices}")
             appendLine()

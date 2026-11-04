@@ -3,6 +3,7 @@ package com.example.keymapper.diagnostics
 import android.content.Context
 import android.os.Build
 import com.example.keymapper.input.InputDeviceManager
+import com.example.keymapper.injection.NativeBackendLibrary
 import java.io.File
 
 /**
@@ -18,36 +19,37 @@ object InputBackendProbe {
         val matchingEntries: Int? = null
     )
 
-    fun inspect(context: Context, shizukuAuthorized: Boolean): String {
+    fun inspect(context: Context, shizukuReady: Boolean): String {
         val inputDirectory = observeDirectory(File("/dev/input"), Regex("event\\d+"))
         val uinputNode = observePath(File("/dev/uinput"))
         val sysInputDirectory = observeDirectory(File("/sys/class/input"), Regex("event\\d+"))
-        val nativeLibrary = File(context.applicationInfo.nativeLibraryDir, "libkeymapper_input.so")
+        val nativeLibrary = File(context.applicationInfo.nativeLibraryDir, NativeBackendLibrary.FILE_NAME)
         val devices = runCatching { InputDeviceManager.snapshot() }.getOrNull()
         val capture = BackendCapabilityPolicy.assess(
             nativeModulePresent = nativeLibrary.isFile,
-            backendInitialized = false,
-            endToEndVerified = false
+            backendInitialized = null,
+            endToEndVerified = null
         )
-        // Não existe módulo nativo de saída separado nesta revisão.
+        // evdev_capture.cpp e uinput_touch.cpp são compilados no mesmo shared library.
+        // Presença do .so prova apenas que o código foi empacotado, não que uinput abriu.
         val virtualOutput = BackendCapabilityPolicy.assess(
-            nativeModulePresent = false,
-            backendInitialized = false,
-            endToEndVerified = false
+            nativeModulePresent = nativeLibrary.isFile,
+            backendInitialized = null,
+            endToEndVerified = null
         )
 
         return buildString {
             appendLine("SONDAGEM NÃO INVASIVA DO BACKEND")
             appendLine("Android API=${Build.VERSION.SDK_INT}; ABI=${Build.SUPPORTED_ABIS.joinToString()}")
             appendLine("Dispositivos reconhecidos pela API Android: ${devices?.devices?.size ?: "indisponível"}")
-            appendLine("Shizuku autorizado para o app: $shizukuAuthorized")
+            appendLine("Shizuku/InputManager considerados prontos pelo processo do app: $shizukuReady")
             appendLine("Shizuku grant isolado concede /dev/input ou /dev/uinput: ${BackendCapabilityPolicy.shizukuGrantAloneConfirmsKernelNodeAccess()}")
             appendLine("/dev/input: ${describe(inputDirectory)}")
             appendLine("/sys/class/input: ${describe(sysInputDirectory)}")
             appendLine("/dev/uinput: ${describe(uinputNode)}")
-            appendLine("Biblioteca libkeymapper_input.so presente: ${nativeLibrary.isFile}")
+            appendLine("Biblioteca ${nativeLibrary.name} (evdev_capture + uinput_touch) presente: ${nativeLibrary.isFile}")
             appendLine("Captura global evdev: ${capture.level} — ${capture.description}")
-            appendLine("Saída virtual uinput: ${virtualOutput.level} — ${virtualOutput.description}")
+            appendLine("Saída virtual uinput (mesma biblioteca; inicialização não consultada): ${virtualOutput.level} — ${virtualOutput.description}")
             appendLine("Limite: exists/canRead/canWrite/listFiles refletem apenas metadados vistos pelo processo; não provam abertura, ioctl, permissões SELinux, grab, escrita no dispositivo nem entrega ao app de destino.")
             appendLine("Nenhum nó de evento foi aberto ou capturado durante esta sondagem.")
         }

@@ -16,17 +16,27 @@ class VirtualCursorController(initialX: Double = 0.0, initialY: Double = 0.0) {
     @Volatile private var px = normalize(initialX)
     @Volatile private var py = normalize(initialY)
 
-    /** Atualiza a posição lógica e devolve o delta efetivamente aceito pelo acumulador. */
+    /** Atualiza sem alocação; [out] contém a posição X/Y resultante. */
     @Synchronized
-    fun advance(dx: Float, dy: Float): Motion? {
-        if (!dx.isFinite() || !dy.isFinite() || (dx == 0f && dy == 0f)) return null
+    fun advanceInto(dx: Float, dy: Float, out: DoubleArray): Boolean {
+        if (out.size < 2 || !dx.isFinite() || !dy.isFinite() || (dx == 0f && dy == 0f)) return false
         val oldX = px
         val oldY = py
         px = normalize(px + dx.toDouble())
         py = normalize(py + dy.toDouble())
-        return Motion(px - oldX, py - oldY, Position(px, py)).takeIf {
-            it.deltaX != 0.0 || it.deltaY != 0.0
-        }
+        out[0] = px
+        out[1] = py
+        return px != oldX || py != oldY
+    }
+
+    /** Atualiza a posição lógica e devolve o delta efetivamente aceito pelo acumulador. */
+    @Synchronized
+    fun advance(dx: Float, dy: Float): Motion? {
+        val oldX = px
+        val oldY = py
+        val position = DoubleArray(2)
+        if (!advanceInto(dx, dy, position)) return null
+        return Motion(px - oldX, py - oldY, Position(position[0], position[1]))
     }
 
     /** Compatibilidade para chamadas que só precisam consultar a posição após mover. */
@@ -60,8 +70,9 @@ class VirtualCursorController(initialX: Double = 0.0, initialY: Double = 0.0) {
         if (value.isFinite()) value.coerceIn(-MAX_LOGICAL_COORDINATE, MAX_LOGICAL_COORDINATE) else 0.0
 
     private companion object {
-        // Limite de integridade, não limite de tela. Mesmo 1e12 unidades excede enormemente
-        // qualquer sessão humana de movimento; evita perda de precisão por valores corrompidos.
-        const val MAX_LOGICAL_COORDINATE = 1_000_000_000_000.0
+        // Guarda numérica, não limite de tela. A coordenada lógica deve poder acumular
+        // sessões muito longas e ultrapassar qualquer dimensão de display sem wrap/clamp visível.
+        // O teto é apenas contra valores não representáveis e está muito além de qualquer entrada real.
+        const val MAX_LOGICAL_COORDINATE = 1.0e300
     }
 }

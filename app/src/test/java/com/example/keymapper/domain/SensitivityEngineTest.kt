@@ -50,6 +50,37 @@ class SensitivityEngineTest {
         assertEquals(0, engine.outY)
     }
 
+
+    @Test
+    fun lowSensitivitySubpixelResidueSurvivesRepeatedSamplesAndDirectionReversal() {
+        val engine = SensitivityEngine()
+        var total = 0
+
+        repeat(3) {
+            engine.process(1f, 0f, 0.35f, 1f, 0, 2f, 10f, 1f)
+            total += engine.outX
+        }
+        assertEquals(1, total) // 0.35 + 0.35 + 0.35 crosses one integer unit.
+
+        repeat(3) {
+            engine.process(-1f, 0f, 0.35f, 1f, 0, 2f, 10f, 1f)
+            total += engine.outX
+        }
+        assertEquals(0, total) // the reverse path cancels the accumulated positive path.
+    }
+
+    @Test
+    fun veryLowSensitivityDoesNotDiscardFractionalMovement() {
+        val engine = SensitivityEngine()
+        var total = 0
+        repeat(10) {
+            engine.process(1f, -1f, 0.1f, 0.1f, 0, 2f, 10f, 1f)
+            total += engine.outX
+        }
+        assertEquals(1, total)
+        assertEquals(-1, engine.outY)
+    }
+
     @Test
     fun invalidSensitivityValuesFallBackToOne() {
         val engine = SensitivityEngine()

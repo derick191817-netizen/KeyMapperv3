@@ -22,6 +22,7 @@ class CaptureView(
     companion object {
         private const val TAG = "KeyMapper"
         private const val CAPTURE_TIMEOUT_MS = 1_500L
+        private const val MAX_CAPTURE_RETRIES = 3
     }
 
     @Volatile private var want = false
@@ -29,22 +30,46 @@ class CaptureView(
     @Volatile private var blockKeysInEditor = false
     @Volatile private var lastRelativeFallbackUptimeMs = 0L
     private var lastPublishedCaptureState = false
+    /** Pointer Capture pode ser revogado sem perder o foco; tentamos recuperar antes de marcar erro. */
+    private var captureRetryCount = 0
     private val physicalInputState = PhysicalInputState()
     // Reusable scratch buffer: evita criar um objeto Delta por amostra a 500–1000 Hz.
     private val deltaScratch = FloatArray(2)
     private val captureTimeout = Runnable {
-        if (InputStatePolicy.shouldReportCaptureTimeout(
-                captureRequested = want,
-                windowFocused = hasWindowFocus(),
-                pointerCaptureConfirmed = hasPointerCapture(),
-                relativeFallbackActive = lastRelativeFallbackUptimeMs > 0L &&
-                    SystemClock.uptimeMillis() - lastRelativeFallbackUptimeMs <= CAPTURE_TIMEOUT_MS * 2L
-            )) {
-            val reason = "Pointer Capture não confirmado após ${CAPTURE_TIMEOUT_MS} ms; a janela pode não estar apta a capturar"
-            InputStateMachine.transition(InputState.ERROR, reason)
-            InputDiagnostics.setCapture(false, hasWindowFocus(), reason, requested = true)
-            InputDiagnostics.setMode(InputState.ERROR.name, reason)
-            publishCaptureState()
+        val focused = hasWindowFocus()
+        val captured = hasPointerCapture()
+        val fallbackActive = lastRelativeFallbackUptimeMs > 0L &&
+            SystemClock.uptimeMillis() - lastRelativeFallbackUptimeMs <= CAPTURE_TIMEOUT_MS * 2L
+        when (CaptureRetryPolicy.decide(
+            requested = want,
+            windowFocused = focused,
+            captureConfirmed = captured,
+            relativeFallbackActive = fallbackActive,
+            retryCount = captureRetryCount,
+            maxRetries = MAX_CAPTURE_RETRIES
+        )) {
+            CaptureRetryPolicy.Action.NO_ACTION -> Unit
+            CaptureRetryPolicy.Action.WAIT_FOR_FALLBACK -> {
+                // Há movimento relativo chegando por generic motion. Não declare erro nem deixe
+                // de observar a captura: ela ainda pode ser recuperada depois que o sistema estabilizar.
+                postDelayed(captureTimeout, CAPTURE_TIMEOUT_MS)
+            }
+            CaptureRetryPolicy.Action.RETRY -> {
+                captureRetryCount++
+                val reason = "Pointer Capture não confirmado; nova tentativa $captureRetryCount/$MAX_CAPTURE_RETRIES"
+                Log.w(TAG, reason)
+                InputStateMachine.transition(InputState.GRAB_REQUESTED, reason)
+                InputDiagnostics.setCapture(false, focused, reason, requested = true)
+                requestPointerCapture()
+                postDelayed(captureTimeout, CAPTURE_TIMEOUT_MS)
+            }
+            CaptureRetryPolicy.Action.FAIL -> {
+                val reason = "Pointer Capture não foi concedido após $MAX_CAPTURE_RETRIES tentativas; verifique foco e compatibilidade do jogo"
+                InputStateMachine.transition(InputState.ERROR, reason)
+                InputDiagnostics.setCapture(false, focused, reason, requested = true)
+                InputDiagnostics.setMode(InputState.ERROR.name, reason)
+                publishCaptureState()
+            }
         }
     }
 
@@ -73,6 +98,7 @@ class CaptureView(
     fun start() {
         blockKeysInEditor = false
         lastRelativeFallbackUptimeMs = 0L
+        captureRetryCount = 0
         want = true
         InputStateMachine.transition(InputState.GRAB_REQUESTED, "solicitação de Pointer Capture")
         InputDiagnostics.setCapture(hasPointerCapture(), hasWindowFocus(), "CaptureView.start", requested = true)
@@ -85,6 +111,7 @@ class CaptureView(
     fun stop() {
         want = false
         lastRelativeFallbackUptimeMs = 0L
+        captureRetryCount = 0
         removeCallbacks(captureTimeout)
         InputStateMachine.transition(InputState.RELEASE_REQUESTED, "liberação solicitada")
         val wasCaptured = hasPointerCapture()
@@ -115,6 +142,7 @@ class CaptureView(
         publishCaptureState()
         if (!hasWindowFocus && want) {
             lastRelativeFallbackUptimeMs = 0L
+            captureRetryCount = 0
             removeCallbacks(captureTimeout)
             InputStateMachine.transition(InputState.SUSPENDED, "janela perdeu foco")
         } else if (want && hasPointerCapture()) {
@@ -133,15 +161,20 @@ class CaptureView(
     }
 
     override fun onPointerCaptureChange(hasCapture: Boolean) {
+        val wasPublishedActive = lastPublishedCaptureState
         super.onPointerCaptureChange(hasCapture)
         Log.d(TAG, "Pointer Capture ${if (hasCapture) "ativado" else "desativado"}; want=$want, focus=${hasWindowFocus()}")
         InputDiagnostics.setCapture(hasCapture, hasWindowFocus(), "pointerCaptureChange", requested = want)
         if (hasCapture) {
             lastRelativeFallbackUptimeMs = 0L
+            captureRetryCount = 0
             removeCallbacks(captureTimeout)
         }
         // Se a captura foi perdida, nenhum botão/tecla física pode permanecer marcado como pressionado.
-        if (!hasCapture) releaseHeldInputs()
+        if (!hasCapture) {
+            releaseHeldInputs()
+            if (wasPublishedActive) captureRetryCount = 0
+        }
         publishCaptureState()
         if (hasCapture && want && hasWindowFocus()) {
             InputStateMachine.transition(InputState.GRABBED, "Pointer Capture concedido")
@@ -216,7 +249,19 @@ class CaptureView(
             if (event.deviceId >= 0) releaseHeldInputs(event.deviceId) else releaseHeldInputs()
             return
         }
-        val state = event.buttonState
+        val buttonTransition = when (event.actionMasked) {
+            MotionEvent.ACTION_BUTTON_PRESS -> true to event.actionButton
+            MotionEvent.ACTION_BUTTON_RELEASE -> false to event.actionButton
+            // Alguns drivers/firmwares Android ainda representam o botão primário como DOWN/UP.
+            MotionEvent.ACTION_DOWN -> true to MotionEvent.BUTTON_PRIMARY
+            MotionEvent.ACTION_UP -> false to MotionEvent.BUTTON_PRIMARY
+            else -> null
+        }
+        val state = MouseButtonStatePolicy.resolve(
+            reportedMask = event.buttonState,
+            actionButton = buttonTransition?.second ?: 0,
+            pressed = buttonTransition?.first
+        )
         val changed = physicalInputState.updateButtons(event.deviceId, state)
         if (changed != 0) {
             val bits = intArrayOf(

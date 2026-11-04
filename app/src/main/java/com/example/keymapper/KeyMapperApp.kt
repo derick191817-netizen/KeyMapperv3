@@ -3,6 +3,7 @@ package com.example.keymapper
 import android.app.Application
 import com.example.keymapper.data.SettingsRepository
 import com.example.keymapper.diagnostics.CrashReporter
+import com.example.keymapper.diagnostics.RestartDiagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +27,7 @@ class KeyMapperApp : Application() {
         super.onCreate()
         // O relatório de crash é auxiliar: uma falha nele não deve bloquear a Activity.
         runCatching { CrashReporter.install(this) }
+        runCatching { RestartDiagnostics.recordAppLaunch(this) }
         // Não inicializar bibliotecas de acesso a APIs ocultas durante a abertura do painel.
         // O recurso é preparado sob demanda pelo injetor, para que uma incompatibilidade
         // com o fabricante/Android não impeça a Activity principal de abrir.

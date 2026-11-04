@@ -56,6 +56,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -66,17 +67,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import com.example.keymapper.data.AppSettings
 import com.example.keymapper.display.DisplayHelper
 import com.example.keymapper.injection.Activation
 import com.example.keymapper.injection.ActivationState
+import com.example.keymapper.injection.ShizukuShellBridge
 import com.example.keymapper.presentation.SettingsViewModel
 import com.example.keymapper.service.MappingService
 import com.example.keymapper.util.Haptics
@@ -84,6 +86,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
 
 private val StatusGreen = Color(0xFF55D6A4)
 private val StatusAmber = Color(0xFFF4BD66)
@@ -106,8 +109,39 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
     val detectionSupported = remember(statusKey) { MappingService.detectionSupported }
     val lastDetectedPackage = remember(statusKey) { MappingService.detectedPackage }
     var showActivationSheet by remember { mutableStateOf(false) }
+    var showWirelessAdbDialog by remember { mutableStateOf(false) }
+    var shellProbeText by remember { mutableStateOf("") }
+    var shellProbeRunning by remember { mutableStateOf(false) }
     val activationSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val shizukuConnected = activationState == ActivationState.READY
+
+    // O estado é atualizado por eventos reais do Shizuku, e não apenas por um timer de UI.
+    val permissionListener = remember(ctx) {
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == Activation.REQUEST_CODE) {
+                refresh++
+                Toast.makeText(
+                    ctx,
+                    if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                        "Permissão Shizuku concedida. Verificando InputManager..."
+                    else "Permissão Shizuku negada.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+    val binderReceivedListener = remember(ctx) { Shizuku.OnBinderReceivedListener { refresh++ } }
+    val binderDeadListener = remember(ctx) { Shizuku.OnBinderDeadListener { refresh++ } }
+    DisposableEffect(ctx, permissionListener, binderReceivedListener, binderDeadListener) {
+        runCatching { Shizuku.addRequestPermissionResultListener(permissionListener) }
+        runCatching { Shizuku.addBinderReceivedListenerSticky(binderReceivedListener) }
+        runCatching { Shizuku.addBinderDeadListener(binderDeadListener) }
+        onDispose {
+            runCatching { Shizuku.removeRequestPermissionResultListener(permissionListener) }
+            runCatching { Shizuku.removeBinderReceivedListener(binderReceivedListener) }
+            runCatching { Shizuku.removeBinderDeadListener(binderDeadListener) }
+        }
+    }
 
     fun refreshLater() {
         scope.launch {
@@ -135,13 +169,15 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
         if (!shizukuConnected) {
             Toast.makeText(
                 ctx,
-                "Shizuku desconectado: o serviço pode abrir, mas a injeção de toques não ficará disponível até a autorização.",
+                Activation.guide(activationState, android.os.Build.VERSION.SDK_INT),
                 Toast.LENGTH_LONG
             ).show()
+            showActivationSheet = true
+            return false
         }
         if (!serviceRunning) {
             try {
-                ContextCompat.startForegroundService(ctx, Intent(ctx, MappingService::class.java))
+                MappingService.requestStart(ctx)
             } catch (e: Exception) {
                 Toast.makeText(ctx, "Não foi possível iniciar o serviço: ${e.localizedMessage ?: "erro desconhecido"}", Toast.LENGTH_LONG).show()
                 return false
@@ -159,7 +195,9 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
             return
         }
         try {
-            val displayId = DisplayHelper(ctx).target().displayId
+            val displayId = DisplayHelper(ctx).apply {
+                useExternal = cfg.useExternalDisplay
+            }.target().displayId
             val launchOptions = ActivityOptions.makeBasic().setLaunchDisplayId(displayId)
             ctx.startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), launchOptions.toBundle())
             refreshLater()
@@ -175,8 +213,14 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
 
     fun stopServiceFromPanel() {
         Haptics.tick(view)
+        // stopService() não cria uma nova instância apenas para enviar ACTION_STOP.
+        // startService(ACTION_STOP) podia executar onCreate()/startForeground() em um
+        // serviço que já não existia, aparentando uma nova partida durante o desligamento.
         runCatching {
-            ctx.startService(Intent(ctx, MappingService::class.java).setAction(MappingService.ACTION_STOP))
+            val stopped = ctx.stopService(Intent(ctx, MappingService::class.java))
+            if (!stopped && MappingService.running) {
+                Toast.makeText(ctx, "O Android não confirmou a parada do serviço.", Toast.LENGTH_SHORT).show()
+            }
         }.onFailure {
             Toast.makeText(ctx, "Não foi possível interromper o serviço.", Toast.LENGTH_SHORT).show()
         }
@@ -188,12 +232,18 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
         when {
             !overlayGranted -> openOverlaySettings()
             activationState == ActivationState.NEEDS_PERMISSION -> {
-                Activation.requestPermission()
-                refreshLater()
+                if (!Activation.requestPermission()) {
+                    Toast.makeText(ctx, "Não foi possível solicitar a permissão. Confira se o Shizuku está ativo.", Toast.LENGTH_LONG).show()
+                }
             }
-            shizukuConnected -> Toast.makeText(ctx, "Permissões necessárias já concedidas.", Toast.LENGTH_SHORT).show()
+            shizukuConnected -> Toast.makeText(ctx, "Shizuku e permissão INJECT_EVENTS disponíveis.", Toast.LENGTH_SHORT).show()
+            activationState == ActivationState.INPUT_PERMISSION_MISSING ||
+                activationState == ActivationState.INPUT_SERVICE_UNAVAILABLE -> {
+                Toast.makeText(ctx, Activation.guide(activationState, android.os.Build.VERSION.SDK_INT), Toast.LENGTH_LONG).show()
+                showActivationSheet = true
+            }
             else -> {
-                Toast.makeText(ctx, "Abra a ativação via Wi-Fi para iniciar o Shizuku.", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, "Inicie o Shizuku por Depuração sem fio e retorne ao KeyMapper.", Toast.LENGTH_LONG).show()
                 showActivationSheet = true
             }
         }
@@ -205,17 +255,17 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Surface(
-                            shape = RoundedCornerShape(11.dp),
+                            shape = RoundedCornerShape(13.dp),
                             color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(38.dp)
+                            modifier = Modifier.size(42.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text("K", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.titleLarge)
+                                Text("KM", color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                             }
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Text("KeyMapper", style = MaterialTheme.typography.titleLarge)
-                            Text("CONSOLE DE CONTROLE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("KeyMapper Studio", style = MaterialTheme.typography.titleLarge)
+                            Text("INPUT CONTROL CENTER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 },
@@ -225,8 +275,8 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         }
@@ -320,23 +370,30 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Text("Ativação via Wi-Fi", style = MaterialTheme.typography.headlineSmall)
+                Text("Acesso do sistema", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "O KeyMapper usa o Shizuku para os recursos privilegiados. A ativação do Shizuku pode precisar ser repetida após reiniciar o celular.",
+                    "O Shizuku continua sendo o backend atual de injeção do motor. O KeyMapper também abre uma sessão ADB sem fio própria, independente do aplicativo Shizuku, para diagnóstico e leitura de métricas. Conectar por ADB não concede root, não libera automaticamente InputManager/uinput e não inicia o mapeamento.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 StatusPill(
                     text = if (shizukuConnected) "Shizuku conectado" else "Shizuku ${activationStateLabel(activationState).lowercase()}",
                     ready = shizukuConnected
                 )
-                SetupStep(1, "Instale e abra o Shizuku", "Instale o Shizuku pela fonte oficial e abra o aplicativo ao menos uma vez.")
-                SetupStep(2, "Ative as opções do desenvolvedor", "Em Configurações › Sobre o telefone › Informações do software, toque sete vezes em Número da versão.")
-                SetupStep(3, "Ative a depuração sem fio", "Nas Opções do desenvolvedor, ative Depuração sem fio e escolha parear com código.")
-                SetupStep(4, "Conclua o pareamento no Shizuku", "Use o código de pareamento solicitado pelo próprio Shizuku e toque em Iniciar.")
-                SetupStep(5, "Volte ao KeyMapper", "Atualize o status. O estado conectado será exibido quando o serviço estiver disponível.")
+                SetupStep(1, "Abra o Shizuku", "No próprio Shizuku, escolha iniciar o pareamento. O pareamento e o início do servidor são gerenciados pelo aplicativo oficial.")
+                SetupStep(2, "Ative a depuração sem fio", "Em Opções do desenvolvedor › Depuração sem fio, ligue a opção. O Android 11 ou superior permite esse fluxo sem computador.")
+                SetupStep(3, "Pareie com código", "Na tela Depuração sem fio, escolha Parear dispositivo com código. Informe o código na notificação de pareamento do Shizuku.")
+                SetupStep(4, "Inicie o servidor Shizuku", "Volte ao Shizuku e toque em Iniciar. A inicialização ADB precisa ser repetida após reiniciar o telefone.")
+                SetupStep(5, "Autorize e valide", "Volte ao KeyMapper, conceda a permissão solicitada e execute a verificação da sessão privilegiada abaixo.")
                 Button(onClick = { openDeveloperSettings(ctx) }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                     Text("Abrir opções do desenvolvedor")
                 }
+                OutlinedButton(
+                    onClick = {
+                        showActivationSheet = false
+                        showWirelessAdbDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) { Text("ADB sem fio direto — sem Shizuku") }
                 OutlinedButton(
                     onClick = {
                         val intent = ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
@@ -349,20 +406,45 @@ fun HomeScreen(viewModel: SettingsViewModel, tick: Int, onOpenSettings: (Int) ->
                     Icon(Icons.Filled.Refresh, contentDescription = null)
                     Text("  Atualizar status")
                 }
-                OutlinedButton(
+                Button(
+                    enabled = !shellProbeRunning,
                     onClick = {
-                        Thread {
-                            val success = Activation.startShizukuViaRoot()
-                            android.os.Handler(ctx.mainLooper).post {
-                                Toast.makeText(ctx, if (success) "Shizuku iniciado via root." else "Root indisponível.", Toast.LENGTH_SHORT).show()
-                                refresh++
-                            }
-                        }.start()
+                        shellProbeRunning = true
+                        shellProbeText = "Conectando ao UserService do Shizuku..."
+                        ShizukuShellBridge.inspectRuntime(ctx) { report ->
+                            shellProbeText = report
+                            shellProbeRunning = false
+                            refresh++
+                        }
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) { Text("Tentar ativação via root") }
+                ) {
+                    Icon(Icons.Filled.Build, contentDescription = null)
+                    Text(if (shellProbeRunning) "  Verificando sessão ADB..." else "  Verificar acesso real ADB / uinput")
+                }
+                if (shellProbeText.isNotBlank()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                    ) {
+                        Text(
+                            shellProbeText,
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
+    }
+
+    if (showWirelessAdbDialog) {
+        WirelessAdbDialog(onDismiss = {
+            showWirelessAdbDialog = false
+            refresh++
+        })
     }
 }
 
@@ -377,17 +459,25 @@ private fun DashboardHero(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(26.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.24f))
     ) {
         Column(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f)).padding(18.dp),
+            Modifier.fillMaxWidth().background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f),
+                        MaterialTheme.colorScheme.surface
+                    )
+                )
+            ).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(8.dp)) {}
-                Text("ESPAÇO DE TRABALHO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(9.dp)) {}
+                Text("CONTROL STUDIO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                 androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                 StatusPill(
                     text = when {
@@ -398,7 +488,7 @@ private fun DashboardHero(
                     ready = serviceRunning && shizukuConnected && overlayGranted
                 )
             }
-            Text("Mapeamento de entrada", style = MaterialTheme.typography.headlineSmall)
+            Text("Seu espaço de controle", style = MaterialTheme.typography.headlineSmall)
             Text(
                 "Configure teclas e controles por aplicativo. O posicionamento é feito no editor flutuante sobre a tela real do jogo, sem área de referência simulada.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -436,11 +526,11 @@ private fun SystemStatusPanel(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(23.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Estado do sistema", style = MaterialTheme.typography.titleMedium)
@@ -480,11 +570,11 @@ private fun AppLaunchPanel(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(23.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Aplicativos e perfis", style = MaterialTheme.typography.titleMedium)
@@ -581,11 +671,11 @@ private fun AccessPanel(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(23.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Acesso e permissões", style = MaterialTheme.typography.titleMedium)
             Text(
                 "A sobreposição exibe o HUD; o Shizuku fornece a integração privilegiada usada para injetar eventos. Nenhum estado é presumido como concedido.",
@@ -598,6 +688,8 @@ private fun AccessPanel(
                 shizukuConnected,
                 if (shizukuConnected) "Conectado" else when (activationState) {
                     ActivationState.NEEDS_PERMISSION -> "Pendente"
+                    ActivationState.INPUT_PERMISSION_MISSING -> "INJECT_EVENTS ausente"
+                    ActivationState.INPUT_SERVICE_UNAVAILABLE -> "InputManager indisponível"
                     else -> activationStateLabel(activationState)
                 }
             )
@@ -607,7 +699,7 @@ private fun AccessPanel(
             }
             OutlinedButton(onClick = onActivation, modifier = Modifier.fillMaxWidth().height(46.dp)) {
                 Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("  Configurar ativação via Wi-Fi")
+                Text("  Configurar ADB / Shizuku")
             }
         }
     }
@@ -617,7 +709,7 @@ private fun AccessPanel(
 private fun QuickSettingsPanel(onOpenSettings: () -> Unit, onOpenApps: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(23.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
     ) {
@@ -638,14 +730,14 @@ private fun QuickSettingsPanel(onOpenSettings: () -> Unit, onOpenApps: () -> Uni
 @Composable
 private fun StatusPill(text: String, ready: Boolean) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = (if (ready) StatusGreen else StatusAmber).copy(alpha = 0.14f)
+        shape = RoundedCornerShape(50),
+        color = (if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary).copy(alpha = 0.15f)
     ) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelSmall,
-            color = if (ready) StatusGreen else StatusAmber,
+            color = if (ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
             maxLines = 1
         )
     }
@@ -653,7 +745,9 @@ private fun StatusPill(text: String, ready: Boolean) {
 
 private fun activationStateLabel(state: ActivationState): String = when (state) {
     ActivationState.READY -> "Conectado"
-    ActivationState.NEEDS_PERMISSION -> "Sem permissão"
+    ActivationState.NEEDS_PERMISSION -> "Sem permissão Shizuku"
+    ActivationState.INPUT_PERMISSION_MISSING -> "INJECT_EVENTS ausente"
+    ActivationState.INPUT_SERVICE_UNAVAILABLE -> "InputManager indisponível"
     ActivationState.SHIZUKU_STOPPED -> "Parado"
     ActivationState.SHIZUKU_MISSING -> "Não instalado"
 }

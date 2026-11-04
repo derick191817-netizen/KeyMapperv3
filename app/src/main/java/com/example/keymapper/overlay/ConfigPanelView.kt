@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.text.InputType
+import android.text.InputFilter
 import android.text.TextWatcher
 import android.text.Editable
 import android.view.Gravity
@@ -31,13 +32,15 @@ import com.example.keymapper.data.displayName
 import com.example.keymapper.data.keyLabel
 import com.example.keymapper.domain.MappingEditorPolicy
 import com.example.keymapper.domain.InputBindingPolicy
+import com.example.keymapper.domain.NumericSettingPolicy
 import com.example.keymapper.util.Haptics
 import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Painel de configuração do botão, por cima do jogo. As alterações são aplicadas ao estado em memória
- * para pré-visualização e ao motor; Salvar persiste, enquanto Cancelar restaura o snapshot original.
+ * Painel de configuração do botão, por cima do jogo. Alterações discretas são aplicadas ao estado
+ * em memória; campos numéricos são confirmados ao concluir a edição ou perder foco. Salvar persiste,
+ * enquanto Cancelar restaura o snapshot original.
  *  - PADRÃO: tecla, modo (toque simples, segurar, alternar, duplo toque), tempo de resposta (0 a 500 ms)
  *  - TIRO: tecla e modo (toque único ou segurar)
  *  - MIRA: sensibilidade X e Y (1 a 10, 1 = neutro), suspender (toggle), deadzone
@@ -57,25 +60,32 @@ class ConfigPanelView(
     private var listenTarget = 0
     private var hint = ""
     private var advancedOpen = false
-    private val gray = Color.rgb(35, 43, 49)
-    private val red = Color.rgb(111, 39, 52)
-    private val dim = Color.rgb(158, 174, 183)
+    private val gray = Color.rgb(26, 39, 51)
+    private val red = Color.rgb(95, 35, 50)
+    private val dim = Color.rgb(159, 181, 196)
+    private val accent = Color.rgb(112, 224, 206)
 
     /** Snapshot imutável usado para restaurar o estado anterior se o usuário cancelar. */
     private val originalSettings = host.settings()
     private var completed = false
     private var globalSettingsOpen = false
+    private data class NumericFieldCommit(val field: EditText, val commit: () -> Boolean)
+    private val numericFieldCommits = mutableListOf<NumericFieldCommit>()
 
     init {
         orientation = VERTICAL
         isFocusable = true
         isFocusableInTouchMode = true
         background = GradientDrawable().apply {
-            setColor(Color.rgb(14, 19, 23))
-            cornerRadius = dp(18).toFloat()
+            setColor(Color.rgb(9, 15, 21))
+            setStroke(dp(1), Color.rgb(42, 65, 77))
+            cornerRadius = dp(22).toFloat()
         }
 
         root.setPadding(dp(14), dp(10), dp(14), dp(8))
+        addView(buildPanelHeader(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(dp(8), dp(8), dp(8), dp(4))
+        })
         scroll.addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -95,12 +105,72 @@ class ConfigPanelView(
                 setMargins(dp(4), 0, dp(4), 0)
             }
         )
-        addView(footer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        footer.background = GradientDrawable().apply {
+            setColor(Color.rgb(15, 24, 32))
+            cornerRadius = dp(16).toFloat()
+        }
+        addView(footer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(dp(8), dp(4), dp(8), dp(8))
+        })
 
         build()
     }
 
     private fun dp(v: Int) = (v * density).roundToInt()
+
+    private fun buildPanelHeader(): View {
+        val button = host.settings().buttons.firstOrNull { it.id == buttonId }
+        return LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(10), dp(12))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(Color.rgb(20, 48, 59), Color.rgb(18, 29, 42), Color.rgb(14, 19, 23))
+            ).apply { cornerRadius = dp(16).toFloat() }
+
+            val emblem = TextView(context).apply {
+                text = "KM"
+                textSize = 13f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(Color.rgb(7, 31, 34))
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply {
+                    setColor(accent)
+                    cornerRadius = dp(11).toFloat()
+                }
+            }
+            addView(emblem, LayoutParams(dp(42), dp(42)))
+
+            addView(LinearLayout(context).apply {
+                orientation = VERTICAL
+                setPadding(dp(11), 0, dp(8), 0)
+                addView(TextView(context).apply {
+                    text = "KEYMAPPER STUDIO"
+                    textSize = 9f
+                    letterSpacing = 0.12f
+                    setTextColor(accent)
+                    setTypeface(typeface, Typeface.BOLD)
+                })
+                addView(TextView(context).apply {
+                    text = button?.displayName() ?: "Configuração do controle"
+                    textSize = 16f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setTextColor(Color.WHITE)
+                    setTypeface(typeface, Typeface.BOLD)
+                })
+                addView(TextView(context).apply {
+                    text = "PROPRIEDADES E MAPEAMENTO"
+                    textSize = 9f
+                    letterSpacing = 0.08f
+                    setTextColor(dim)
+                })
+            }, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+            addView(btn("×", false, red) { finish(true) }, LayoutParams(dp(42), dp(42)))
+        }
+    }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         // FLAG_WATCH_OUTSIDE_TOUCH envia ACTION_OUTSIDE para esta janela.
@@ -153,6 +223,10 @@ class ConfigPanelView(
         // Se o Android remover o painel por rotação/encerramento do overlay, preserve o rascunho.
         // Um Cancelar já restaura o snapshot e marca a edição como concluída antes do detach.
         if (!completed) {
+            // Garante que campos válidos sejam confirmados antes do detach. Rascunhos inválidos
+            // nunca são enviados ao modelo; o último valor válido continua sendo persistido.
+            findFocus()?.clearFocus()
+            commitNumericFields()
             completed = true
             host.persist()
         }
@@ -265,27 +339,27 @@ class ConfigPanelView(
         })
         add(divider())
         add(tableNumberRow("Sensibilidade do mouse", s.bsMouseSensitivity.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
-            raw.toIntOrNull()?.takeIf { it in 0..200 }?.let { value ->
-                updateGlobal { it.copy(bsMouseSensitivity = value) }
-            }
+            val value = NumericSettingPolicy.intValue(raw, 0..200) ?: return@tableNumberRow false
+            updateGlobal { it.copy(bsMouseSensitivity = value) }
+            true
         })
         add(divider())
         add(tableNumberRow("Relação de sensibilidade", s.bsSensitivityRatio.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED) { raw ->
-            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0.01f..10f }?.let { value ->
-                updateGlobal { it.copy(bsSensitivityRatio = value) }
-            }
+            val value = NumericSettingPolicy.floatValue(raw, 0.01f, 10f) ?: return@tableNumberRow false
+            updateGlobal { it.copy(bsSensitivityRatio = value) }
+            true
         })
         add(divider())
         add(tableNumberRow("Ajuste", s.bsFineTune.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
-            raw.toIntOrNull()?.takeIf { it in 1..1_000_000 }?.let { value ->
-                updateGlobal { it.copy(bsFineTune = value) }
-            }
+            val value = NumericSettingPolicy.intValue(raw, 1..1_000_000) ?: return@tableNumberRow false
+            updateGlobal { it.copy(bsFineTune = value) }
+            true
         })
         add(divider())
         add(tableNumberRow("Posição X da câmera livre", s.bsLookPositionX.toString(), InputType.TYPE_CLASS_NUMBER) { raw ->
-            raw.toIntOrNull()?.takeIf { it in 0..1000 }?.let { value ->
-                updateGlobal { it.copy(bsLookPositionX = value) }
-            }
+            val value = NumericSettingPolicy.intValue(raw, 0..1000) ?: return@tableNumberRow false
+            updateGlobal { it.copy(bsLookPositionX = value) }
+            true
         })
         add(divider())
         add(sectionTitle("Modo de câmera"))
@@ -294,15 +368,19 @@ class ConfigPanelView(
             gravity = Gravity.CENTER_VERTICAL
             val enabled = s.lookMode != Rot.OFF
             addView(CheckBox(context).apply {
-                text = "Ativar o modo"
+                text = "Movimento contínuo da câmera"
                 setTextColor(Color.WHITE)
                 isChecked = enabled
                 buttonTintList = android.content.res.ColorStateList.valueOf(Color.rgb(125, 211, 252))
                 setOnCheckedChangeListener { _, checked ->
-                    updateGlobal { it.copy(lookMode = if (checked) Rot.AUTO else Rot.OFF) }
+                    updateGlobal { it.copy(lookMode = if (checked) Rot.AUTO else Rot.OFF, relativeMouse = false) }
                 }
             }, LinearLayout.LayoutParams(0, dp(42), 1f))
         })
+        add(option(
+            "Padrão global",
+            "Esta opção define a estratégia padrão. Um controle Sight/Aim pode sobrescrevê-la individualmente nas propriedades do botão."
+        ))
         add(divider())
         add(sectionTitle("CONFIGURAÇÃO DO BOTÃO SELECIONADO"))
     }
@@ -339,11 +417,22 @@ class ConfigPanelView(
         addView(btn(value, false, gray, onClick), LinearLayout.LayoutParams(dp(112), dp(38)))
     }
 
-    private fun tableNumberRow(title: String, initial: String, inputTypeValue: Int, onValid: (String) -> Unit): View {
+    /**
+     * Campo numérico transacional: texto digitado permanece como rascunho até Done ou perda de foco.
+     * Valores inválidos são destacados e nunca chegam ao motor/configuração.
+     */
+    private fun numericField(
+        initial: String,
+        inputTypeValue: Int,
+        onCommit: (String) -> Boolean
+    ): EditText {
+        val normalStroke = Color.rgb(47, 77, 91)
+        val invalidStroke = Color.rgb(220, 76, 76)
+        var lastCommitted = initial
         val field = EditText(context).apply {
             setText(initial)
             setTextColor(Color.WHITE)
-            setHintTextColor(Color.rgb(145, 160, 180))
+            setHintTextColor(dim)
             textSize = 14f
             inputType = inputTypeValue
             setSingleLine(true)
@@ -352,38 +441,79 @@ class ConfigPanelView(
             isFocusableInTouchMode = true
             imeOptions = EditorInfo.IME_ACTION_DONE
             gravity = Gravity.CENTER
-            setPadding(dp(5), dp(4), dp(5), dp(4))
+            setPadding(dp(6), dp(5), dp(6), dp(5))
             background = GradientDrawable().apply {
-                setColor(Color.rgb(12, 19, 31))
-                setCornerRadius(dp(4).toFloat())
-                setStroke(dp(1), Color.rgb(30, 58, 138))
-            }
-            setOnEditorActionListener { _, actionId, _ ->
-                if (actionId == EditorInfo.IME_ACTION_DONE) {
-                    clearFocus()
-                    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(windowToken, 0)
-                    true
-                } else false
-            }
-            setOnTouchListener { v, event ->
-                if (event.actionMasked == MotionEvent.ACTION_UP) {
-                    v.requestFocus()
-                    v.post {
-                        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                            ?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
-                    }
-                }
-                false
+                setColor(Color.rgb(13, 24, 33))
+                cornerRadius = dp(10).toFloat()
+                setStroke(dp(1), normalStroke)
             }
         }
+
+        fun setFieldStroke(color: Int) {
+            (field.background.mutate() as? GradientDrawable)?.setStroke(dp(1), color)
+        }
+
+        fun commit(): Boolean {
+            val raw = field.text?.toString()?.trim().orEmpty()
+            if (raw == lastCommitted) {
+                field.error = null
+                setFieldStroke(normalStroke)
+                return true
+            }
+            val accepted = raw.isNotEmpty() && runCatching { onCommit(raw) }.getOrDefault(false)
+            if (accepted) {
+                lastCommitted = raw
+                field.error = null
+                setFieldStroke(normalStroke)
+                return true
+            }
+            field.error = "Valor inválido ou fora do intervalo"
+            setFieldStroke(invalidStroke)
+            return false
+        }
+
         field.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                val raw = s?.toString().orEmpty()
-                if (raw.isNotBlank() && raw != "." && raw != ",") onValid(raw)
+                field.error = null
+                setFieldStroke(normalStroke)
             }
             override fun afterTextChanged(s: Editable?) {}
         })
+        field.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                if (commit()) {
+                    field.clearFocus()
+                    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                        ?.hideSoftInputFromWindow(field.windowToken, 0)
+                }
+                true
+            } else false
+        }
+        field.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) commit()
+        }
+        field.setOnTouchListener { v, event ->
+            if (event.actionMasked == MotionEvent.ACTION_UP) {
+                v.requestFocus()
+                v.post {
+                    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                        ?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+            false
+        }
+        numericFieldCommits += NumericFieldCommit(field) { commit() }
+        return field
+    }
+
+    private fun tableNumberRow(
+        title: String,
+        initial: String,
+        inputTypeValue: Int,
+        onValid: (String) -> Boolean
+    ): View {
+        val field = numericField(initial, inputTypeValue, onCommit = onValid)
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -397,33 +527,13 @@ class ConfigPanelView(
         }
     }
 
-    private fun numberSettingRow(title: String, initial: String, inputTypeValue: Int, onValid: (String) -> Unit): View {
-        val field = EditText(context).apply {
-            setText(initial)
-            setTextColor(Color.WHITE)
-            setHintTextColor(dim)
-            textSize = 14f
-            inputType = inputTypeValue
-            setSingleLine(true)
-            isFocusable = true
-            isFocusableInTouchMode = true
-            imeOptions = EditorInfo.IME_ACTION_DONE
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(6), dp(8), dp(6))
-            background = GradientDrawable().apply {
-                setColor(Color.argb(255, 17, 25, 38))
-                setCornerRadius(dp(7).toFloat())
-                setStroke(dp(1), Color.argb(255, 65, 82, 105))
-            }
-        }
-        field.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                val raw = s?.toString().orEmpty()
-                if (raw.isNotBlank() && raw != "-" && raw != "." && raw != ",") onValid(raw)
-            }
-            override fun afterTextChanged(s: Editable?) {}
-        })
+    private fun numberSettingRow(
+        title: String,
+        initial: String,
+        inputTypeValue: Int,
+        onValid: (String) -> Boolean
+    ): View {
+        val field = numericField(initial, inputTypeValue, onCommit = onValid)
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -437,10 +547,30 @@ class ConfigPanelView(
         }
     }
 
+    private fun commitNumericFields(): Boolean {
+        var allValid = true
+        numericFieldCommits.forEach { entry ->
+            if (!entry.commit()) allValid = false
+        }
+        return allValid
+    }
+
     private fun closeNow() = finish(true)
 
     private fun finish(saveChanges: Boolean) {
         if (completed) return
+        // O campo pode continuar focado quando o usuário toca em Salvar/Cancelar ou no X.
+        findFocus()?.clearFocus()
+        if (saveChanges && !commitNumericFields()) {
+            numericFieldCommits.firstOrNull { it.field.error != null }?.field?.let { invalid ->
+                invalid.requestFocus()
+                invalid.post {
+                    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                        ?.showSoftInput(invalid, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+            return
+        }
         completed = true
         if (saveChanges) {
             host.persist()
@@ -483,6 +613,9 @@ class ConfigPanelView(
     // ---------- construção da UI ----------
 
     private fun build() {
+        // Não destrói o rascunho de um campo inválido ao reconstruir o painel.
+        if (!commitNumericFields()) return
+        numericFieldCommits.clear()
         root.removeAllViews()
         val b = host.settings().buttons.firstOrNull { it.id == buttonId }
         if (b == null) {
@@ -529,6 +662,10 @@ class ConfigPanelView(
         ) { v -> mod { it.copy(delayMs = v.roundToInt()) } })
         add(label("Não há repetição automática (rapid fire): um aperto nunca vira vários toques.", 11f, dim))
 
+        // Propriedades comuns não ficam escondidas em "Mais opções": cada botão tem nome,
+        // tamanho, opacidade e posição editáveis logo na primeira abertura do painel.
+        appearance(b)
+        add(btn("Apagar botão", false, red) { deleteButton() })
         moreButton()
         if (advancedOpen) {
             val others = s.buttons.filter { it.id != b.id }
@@ -545,8 +682,6 @@ class ConfigPanelView(
                 }
                 for (chunk in chips.chunked(2)) add(row(*chunk.toTypedArray()))
             }
-            appearance(b)
-            add(btn("Apagar botão", false, red) { deleteButton() })
         }
     }
 
@@ -565,6 +700,9 @@ class ConfigPanelView(
         ))
         add(label("Não há rajada automática (burst): um aperto nunca vira vários toques.", 11f, dim))
 
+        // Propriedades visuais e exclusão ficam disponíveis sem precisar expandir o painel.
+        appearance(b)
+        add(btn("Apagar botão", false, red) { deleteButton() })
         moreButton()
         if (advancedOpen) {
             add(option("Mirar ao atirar", "Segurar o tiro aciona também o botão de mira escolhido (e usa a sensibilidade dele)."))
@@ -582,8 +720,6 @@ class ConfigPanelView(
                 }
                 for (chunk in opts.chunked(3)) add(row(*chunk.toTypedArray()))
             }
-            appearance(b)
-            add(btn("Apagar botão", false, red) { deleteButton() })
         }
     }
 
@@ -613,25 +749,37 @@ class ConfigPanelView(
         add(divider())
         add(sectionTitle("2 · SENSIBILIDADE"))
         add(numberSettingRow("Sensibilidade do mouse", b.aimMouseSens.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
-            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0f..200f }?.let { value -> mod { it.copy(aimMouseSens = value) } }
+            val value = NumericSettingPolicy.floatValue(raw, 0f, 200f) ?: return@numberSettingRow false
+            mod { it.copy(aimMouseSens = value) }
+            true
         })
         add(numberSettingRow("Relação X", b.aimSensX.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
-            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0.01f..10f }?.let { value -> mod { it.copy(aimSensX = value) } }
+            val value = NumericSettingPolicy.floatValue(raw, 0.01f, 10f) ?: return@numberSettingRow false
+            mod { it.copy(aimSensX = value) }
+            true
         })
         add(numberSettingRow("Relação Y", b.aimSensY.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
-            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0.01f..10f }?.let { value -> mod { it.copy(aimSensY = value) } }
+            val value = NumericSettingPolicy.floatValue(raw, 0.01f, 10f) ?: return@numberSettingRow false
+            mod { it.copy(aimSensY = value) }
+            true
         })
         add(numberSettingRow("Ajuste (Fine Tune)", b.aimGeneral.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
-            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 1f..1_000_000f }?.let { value -> mod { it.copy(aimGeneral = value) } }
+            val value = NumericSettingPolicy.floatValue(raw, 1f, 1_000_000f) ?: return@numberSettingRow false
+            mod { it.copy(aimGeneral = value) }
+            true
         })
 
         add(divider())
         add(sectionTitle("3 · POSIÇÃO"))
         add(numberSettingRow("Posição X", b.aimPosX.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
-            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0f..1000f }?.let { value -> mod { it.copy(aimPosX = value) } }
+            val value = NumericSettingPolicy.floatValue(raw, 0f, 1000f) ?: return@numberSettingRow false
+            mod { it.copy(aimPosX = value) }
+            true
         })
         add(numberSettingRow("Posição Y", b.aimPosY.toString(), InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL) { raw ->
-            raw.replace(',', '.').toFloatOrNull()?.takeIf { it in 0f..1000f }?.let { value -> mod { it.copy(aimPosY = value) } }
+            val value = NumericSettingPolicy.floatValue(raw, 0f, 1000f) ?: return@numberSettingRow false
+            mod { it.copy(aimPosY = value) }
+            true
         })
         add(label("X/Y usam escala lógica de 0 a 1000. Os valores padrão 199, 199, 69, 0,9 e 16240 são preservados.", 10f, dim))
         if (hint.isNotEmpty()) add(label(hint, 11f, Color.YELLOW))
@@ -643,6 +791,11 @@ class ConfigPanelView(
                 "Deadzone", "Ignora micro-movimentos do mouse. 0 = desligado.",
                 b.aimDeadzone, 0f, 5f, 0.1f, 0f, 100f, "%.1f"
             ) { v -> mod { it.copy(aimDeadzone = v) } })
+            add(slider(
+                "Raio de recentralização (AUTO/Nonstop)",
+                "Inspirado no Radius do Aiming Mode: 0% preserva o limite retangular antigo; valores maiores recentralizam em um círculo. Usado nos modos AUTO/Nonstop; Boundary (OFF) continua limitado e INFINITE usa mouse relativo nativo. O raio nunca ultrapassa os limites seguros do toque.",
+                b.aimBoundaryRadiusPct, 0f, 45f, 1f, 0f, 45f, "%.0f%%"
+            ) { v -> mod { it.copy(aimBoundaryRadiusPct = v) } })
             rotationBlock(b)
             buildAimAdvanced(b)
         }
@@ -688,6 +841,30 @@ class ConfigPanelView(
             b.aimPosY / 10f, 0f, 100f, 0.5f, 0f, 100f, "%.1f"
         ) { v -> mod { it.copy(aimPosY = v * 10f) } })
 
+        add(label("Comportamento de contato", 14f, Color.WHITE, true))
+        val inheritAutoRelease = b.aimAutoReleaseMs == -1
+        add(toggle(
+            "Herdar liberação automática global",
+            "Ligado: usa o tempo global da aba Mira. Desligado: esta mira possui um tempo próprio.",
+            inheritAutoRelease
+        ) { useGlobal ->
+            mod {
+                it.copy(
+                    aimAutoReleaseMs = if (useGlobal) -1 else host.settings().lookIdleMs.coerceIn(0, 60_000)
+                )
+            }
+            build()
+        })
+        if (inheritAutoRelease) {
+            add(label("Tempo global atual: ${host.settings().lookIdleMs} ms (0 = manter contato).", 11f, dim))
+        } else {
+            add(slider(
+                "Liberação automática desta mira (ms)",
+                "0 mantém o toque até desativar a mira; valores positivos liberam depois que o mouse fica parado.",
+                b.aimAutoReleaseMs.toFloat(), 0f, 5000f, 100f, 0f, 60_000f, "%.0f"
+            ) { v -> mod { it.copy(aimAutoReleaseMs = v.toInt().coerceIn(0, 60_000)) } })
+        }
+
         add(label("Opções", 14f, Color.WHITE, true))
         add(toggle("Inverter mira", "Mouse para cima = mira para baixo, só com esta mira ativa.", b.aimInvert) { v ->
             mod { it.copy(aimInvert = v) }
@@ -708,19 +885,19 @@ class ConfigPanelView(
     /** Modo de rotação desta mira (sobrepõe o global em Configurações › Mira). */
     private fun rotationBlock(b: HudButton) {
         add(option(
-            "Modo de rotação",
-            "Automático usa arrasto touchscreen com reancoragem, indicado para jogos controlados por toque. Isso evita exigir que o mouse físico volte ao centro, mas a troca de contato pode causar uma pequena interrupção dependendo do jogo. Mouse relativo nativo só funciona em destinos que aceitam esse tipo de evento."
+            "Movimento contínuo da câmera",
+            "Escolha se esta mira herda a configuração global ou usa uma estratégia própria. Nonstop mantém o contato global ativo durante a troca, mas o jogo recebe temporariamente dois ponteiros; alguns jogos não aceitam esse gesto."
         ))
         add(row(
             btn("Usar o global", b.rotMode < 0) { mod { it.copy(rotMode = -1) }; build() },
-            btn("Auto: toque + reancoragem", b.rotMode == Rot.AUTO) { mod { it.copy(rotMode = Rot.AUTO) }; build() }
+            btn("Automático", b.rotMode == Rot.AUTO || b.rotMode == Rot.CENTER) { mod { it.copy(rotMode = Rot.AUTO) }; build() }
         ))
         add(row(
-            btn("Toque + reancoragem", b.rotMode == Rot.CENTER) { mod { it.copy(rotMode = Rot.CENTER) }; build() },
-            btn("Mouse relativo nativo", b.rotMode == Rot.INFINITE) { mod { it.copy(rotMode = Rot.INFINITE) }; build() }
+            btn("Nonstop", b.rotMode == Rot.NONSTOP) { mod { it.copy(rotMode = Rot.NONSTOP) }; build() },
+            btn("Relativo nativo", b.rotMode == Rot.INFINITE) { mod { it.copy(rotMode = Rot.INFINITE) }; build() }
         ))
         add(row(
-            btn("Parar na borda", b.rotMode == Rot.OFF) { mod { it.copy(rotMode = Rot.OFF) }; build() }
+            btn("Limite ativo", b.rotMode == Rot.OFF) { mod { it.copy(rotMode = Rot.OFF) }; build() }
         ))
     }
 
@@ -796,7 +973,7 @@ class ConfigPanelView(
 
     private fun sectionTitle(title: String): TextView = TextView(context).apply {
         text = title
-        setTextColor(Color.rgb(115, 185, 255))
+        setTextColor(accent)
         textSize = 11f
         setTypeface(typeface, Typeface.BOLD)
         letterSpacing = 0.08f
@@ -804,7 +981,7 @@ class ConfigPanelView(
     }
 
     private fun divider(): View = View(context).apply {
-        setBackgroundColor(Color.rgb(30, 58, 138))
+        setBackgroundColor(Color.rgb(44, 76, 88))
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
             topMargin = dp(4)
             bottomMargin = dp(4)
@@ -815,7 +992,7 @@ class ConfigPanelView(
         root.addView(
             v,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                .apply { setMargins(0, dp(3), 0, dp(3)) }
+                .apply { setMargins(0, dp(5), 0, dp(5)) }
         )
     }
 
@@ -839,11 +1016,27 @@ class ConfigPanelView(
             textSize = 14f
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             setSingleLine(true)
+            filters = arrayOf(InputFilter.LengthFilter(24))
             imeOptions = EditorInfo.IME_ACTION_DONE
         }
+        var latest = b.name
+        et.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val next = s?.toString().orEmpty().take(24)
+                if (next != latest) {
+                    latest = next
+                    mod { it.copy(name = next) }
+                }
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
         fun commit() {
             val t = et.text.toString().trim().take(24)
-            if (t != b.name) mod { it.copy(name = t) }
+            if (t != latest) {
+                latest = t
+                mod { it.copy(name = t) }
+            }
         }
         et.setOnEditorActionListener { _, _, _ ->
             commit()
@@ -892,8 +1085,9 @@ class ConfigPanelView(
             textSize = 13f
             setTextColor(Color.WHITE)
             background = GradientDrawable().apply {
-                setColor(if (selected) Color.argb(255, 0, 140, 90) else base)
-                cornerRadius = dp(10).toFloat()
+                setColor(if (selected) Color.rgb(22, 91, 88) else base)
+                setStroke(dp(1), if (selected) Color.argb(105, Color.red(accent), Color.green(accent), Color.blue(accent)) else Color.rgb(53, 73, 86))
+                cornerRadius = dp(12).toFloat()
             }
             minHeight = 0
             minimumHeight = dp(40)

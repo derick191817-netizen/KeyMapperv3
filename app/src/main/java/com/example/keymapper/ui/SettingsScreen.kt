@@ -71,6 +71,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.collectAsState
@@ -98,6 +99,7 @@ import com.example.keymapper.data.Mode
 import com.example.keymapper.data.Rot
 import com.example.keymapper.presentation.SettingsViewModel
 import com.example.keymapper.diagnostics.CrashReporter
+import com.example.keymapper.diagnostics.RestartDiagnostics
 import com.example.keymapper.diagnostics.InputDiagnostics
 import com.example.keymapper.data.keyLabel
 import com.example.keymapper.domain.MappingEditorPolicy
@@ -112,6 +114,7 @@ import com.example.keymapper.input.PointerSpeed
 import com.example.keymapper.service.MappingService
 import com.example.keymapper.util.Haptics
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -138,20 +141,39 @@ private data class Hw(
 )
 
 private fun readHw(ctx: Context): Hw {
-    val dh = DisplayHelper(ctx)
-    val ext = dh.external()
-    val disp = dh.target()
-    val inf = dh.info(disp)
-    val rates = dh.rates(disp)
-    val mi = ActivityManager.MemoryInfo()
-    (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(mi)
-    val gb = (mi.totalMem / (1024.0 * 1024.0 * 1024.0)).roundToInt()
-    val name = Build.MANUFACTURER.replaceFirstChar { it.uppercase() } + " " + Build.MODEL
-    return Hw(
-        name, rates.maxOrNull() ?: disp.refreshRate.roundToInt(), gb,
-        "${inf.width}x${inf.height}", inf.densityDpi, rates,
-        DisplayUtils.isDex(ctx, inf), inf.ratio, ext != null
-    )
+    val name = runCatching {
+        Build.MANUFACTURER.replaceFirstChar { it.uppercase() } + " " + Build.MODEL
+    }.getOrDefault("Dispositivo Android")
+    val ramGb = runCatching {
+        val manager = ctx.getSystemService(ActivityManager::class.java)
+            ?: throw IllegalStateException("ActivityManager indisponível")
+        val memory = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(memory)
+        (memory.totalMem / (1024.0 * 1024.0 * 1024.0)).roundToInt().coerceAtLeast(1)
+    }.getOrDefault(4)
+
+    // A leitura do display é apenas informativa nesta tela. Uma falha transitória
+    // de DeX/DisplayManager deve produzir campos indisponíveis, não derrubar a UI.
+    val displayData = runCatching {
+        val helper = DisplayHelper(ctx)
+        val display = helper.target()
+        val info = helper.info(display)
+        val rates = runCatching { helper.rates(display) }.getOrDefault(emptyList())
+        val refresh = rates.maxOrNull()
+            ?: info.refreshRate.takeIf { it.isFinite() && it > 0f }?.roundToInt()
+            ?: 60
+        val size = if (info.width > 0 && info.height > 0) "${info.width}x${info.height}" else "Indisponível"
+        val dpi = info.densityDpi.takeIf { it in 80..1000 } ?: 0
+        val ratio = info.ratio.takeIf { it.isFinite() && it > 0f } ?: (16f / 9f)
+        Hw(
+            name, refresh, ramGb, size, dpi, rates,
+            runCatching { DisplayUtils.isDex(ctx, info) }.getOrDefault(false),
+            ratio, runCatching { helper.external() != null }.getOrDefault(false)
+        )
+    }.getOrElse {
+        Hw(name, 60, ramGb, "Indisponível", 0, emptyList(), false, 16f / 9f, false)
+    }
+    return displayData
 }
 
 @Composable
@@ -163,7 +185,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, tick: MutableIntState, onBack: 
     val stored by viewModel.settings.collectAsState()
     var draft by remember { mutableStateOf<AppSettings?>(null) }
     var layoutReset by remember { mutableStateOf(false) }
-    var tab by remember(initialTab) { mutableIntStateOf(initialTab) }
+    var tab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, TABS.lastIndex)) }
     var confirmReset by remember { mutableStateOf(false) }
 
     val hw = remember(tick.intValue) { readHw(ctx) }
@@ -193,12 +215,17 @@ fun SettingsScreen(viewModel: SettingsViewModel, tick: MutableIntState, onBack: 
             lookX = prev.lookX, lookY = prev.lookY
         )
         scope.launch {
-            viewModel.save(out)
-            draft = null
-            layoutReset = false
-            Haptics.tick(view)
-            val r = snack.showSnackbar("Configurações salvas", "Desfazer", duration = SnackbarDuration.Long)
-            if (r == SnackbarResult.ActionPerformed) viewModel.save(prev)
+            try {
+                viewModel.saveAndAwait(out)
+                draft = null
+                layoutReset = false
+                Haptics.tick(view)
+                val r = snack.showSnackbar("Configurações gravadas", "Desfazer", duration = SnackbarDuration.Long)
+                if (r == SnackbarResult.ActionPerformed) viewModel.saveAndAwait(prev)
+            } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                snack.showSnackbar("Falha ao gravar as configurações. Os dados ainda não foram confirmados.")
+            }
         }
     }
 
@@ -254,42 +281,81 @@ fun SettingsScreen(viewModel: SettingsViewModel, tick: MutableIntState, onBack: 
             }
         }
     ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize()) {
-            // Navegação em chips: compacta no celular e rolável no DeX, sem imitar uma rail de tablet.
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TABS.forEachIndexed { i, t ->
-                        FilterChip(
-                            selected = tab == i,
-                            onClick = { tab = i; Haptics.tick(view) },
-                            label = { Text(t.title, maxLines = 1) },
-                            leadingIcon = { Icon(t.icon, contentDescription = null, modifier = Modifier.size(17.dp)) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                selectedLeadingIconColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
+        BoxWithConstraints(Modifier.padding(pad).fillMaxSize()) {
+            val desktopSettings = maxWidth >= 760.dp
+            if (desktopSettings) {
+                Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Surface(
+                        modifier = Modifier.width(116.dp).fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(22.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
+                    ) {
+                        NavigationRail(
+                            containerColor = Color.Transparent,
+                            header = {
+                                Text(
+                                    "AJUSTES",
+                                    modifier = Modifier.padding(top = 18.dp, bottom = 14.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        ) {
+                            TABS.forEachIndexed { i, t ->
+                                NavigationRailItem(
+                                    selected = tab == i,
+                                    onClick = { tab = i; Haptics.tick(view) },
+                                    icon = { Icon(t.icon, contentDescription = t.title) },
+                                    label = { Text(t.title, maxLines = 1) },
+                                    alwaysShowLabel = true
+                                )
+                            }
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
+                        shape = RoundedCornerShape(22.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+                    ) {
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 14.dp)) {
+                            SettingsTabBody(tab, d, edit, ctx, state, tick.intValue, hw, conflict, globalBindingConflict, overlayOk, running) { confirmReset = true }
+                        }
                     }
                 }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp)) {
-                when (tab) {
-                    0 -> PointerTab(d, edit)
-                    1 -> AimTab(d, edit)
-                    2 -> AppearanceTab(d, edit)
-                    3 -> DisplayTab(d, edit, hw)
-                    4 -> AppsTab(ctx, d, edit, state, tick.intValue)
-                    else -> {
-                        PerfTab(d, edit, hw)
-                        KeysTab(d, edit, conflict, globalBindingConflict)
-                        SystemTab(ctx, d, edit, hw, state, overlayOk, running) { confirmReset = true }
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp) {
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TABS.forEachIndexed { i, t ->
+                                FilterChip(
+                                    selected = tab == i,
+                                    onClick = { tab = i; Haptics.tick(view) },
+                                    label = { Text(t.title, maxLines = 1) },
+                                    leadingIcon = { Icon(t.icon, contentDescription = null, modifier = Modifier.size(17.dp)) },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        selectedLeadingIconColor = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
+                        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+                    ) {
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 14.dp)) {
+                            SettingsTabBody(tab, d, edit, ctx, state, tick.intValue, hw, conflict, globalBindingConflict, overlayOk, running) { confirmReset = true }
+                        }
                     }
                 }
             }
@@ -306,10 +372,15 @@ fun SettingsScreen(viewModel: SettingsViewModel, tick: MutableIntState, onBack: 
                     onClick = {
                         confirmReset = false
                         scope.launch {
-                            viewModel.save(AppSettings())
-                            draft = null
-                            layoutReset = false
-                            snack.showSnackbar("Reset total concluído")
+                            try {
+                                viewModel.saveAndAwait(AppSettings())
+                                draft = null
+                                layoutReset = false
+                                snack.showSnackbar("Reset total gravado")
+                            } catch (t: Throwable) {
+                                if (t is kotlinx.coroutines.CancellationException) throw t
+                                snack.showSnackbar("Falha ao gravar o reset. As configurações anteriores foram preservadas no armazenamento.")
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
@@ -320,36 +391,74 @@ fun SettingsScreen(viewModel: SettingsViewModel, tick: MutableIntState, onBack: 
     }
 }
 
+@Composable
+private fun SettingsTabBody(
+    tab: Int,
+    d: AppSettings,
+    edit: Edit,
+    ctx: Context,
+    state: ActivationState,
+    tick: Int,
+    hw: Hw,
+    conflict: Boolean,
+    globalBindingConflict: MappingEditorPolicy.KeyBinding?,
+    overlayOk: Boolean,
+    running: Boolean,
+    onReset: () -> Unit
+) {
+    when (tab) {
+        0 -> PointerTab(d, edit)
+        1 -> AimTab(d, edit)
+        2 -> AppearanceTab(d, edit)
+        3 -> DisplayTab(d, edit, hw)
+        4 -> AppsTab(ctx, d, edit, state, tick)
+        else -> {
+            PerfTab(d, edit, hw)
+            KeysTab(d, edit, conflict, globalBindingConflict)
+            SystemTab(ctx, d, edit, hw, state, overlayOk, running, onReset)
+        }
+    }
+}
+
 // ---------------------------------------------------------------- cabeçalho
 
 @Composable
 private fun Header(hw: Hw, state: ActivationState, running: Boolean, dirty: Boolean, onBack: () -> Unit) {
-    Surface(tonalElevation = 3.dp) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 3.dp
+    ) {
         Column(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 14.dp, top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("‹  Painel") }
                 Spacer(Modifier.weight(1f))
-                Surface(shape = RoundedCornerShape(8.dp), color = if (running) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant) {
-                    Text(if (running) "SERVIÇO ATIVO" else "SERVIÇO PARADO", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall)
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (running) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(if (running) "●  SERVIÇO ATIVO" else "○  SERVIÇO PARADO", modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall)
                 }
             }
-            Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
-                Text("Configurações", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "${hw.name}  •  ${hw.hz} Hz  •  ${hw.ramGb} GB RAM",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    "${hw.res} · ${hw.dpi} dpi · Android ${Build.VERSION.RELEASE} · Shizuku ${stateLabel(state)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (dirty) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.padding(11.dp).size(22.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("Centro de configurações", style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        "Alterações não salvas",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.tertiary
+                        "${hw.name} · ${hw.res} · ${hw.hz} Hz · ${hw.dpi} dpi",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Android ${Build.VERSION.RELEASE} · Shizuku ${stateLabel(state)}${if (dirty) " · ALTERAÇÕES PENDENTES" else ""}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (dirty) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -364,7 +473,9 @@ private fun Header(hw: Hw, state: ActivationState, running: Boolean, dirty: Bool
 
 private fun stateLabel(s: ActivationState) = when (s) {
     ActivationState.READY -> "ativo"
-    ActivationState.NEEDS_PERMISSION -> "sem permissão"
+    ActivationState.NEEDS_PERMISSION -> "sem permissão Shizuku"
+    ActivationState.INPUT_PERMISSION_MISSING -> "INJECT_EVENTS ausente"
+    ActivationState.INPUT_SERVICE_UNAVAILABLE -> "InputManager indisponível"
     ActivationState.SHIZUKU_STOPPED -> "parado"
     ActivationState.SHIZUKU_MISSING -> "não instalado"
 }
@@ -486,6 +597,7 @@ private fun Calibrator(target: Float, onX: (Float) -> Unit, onY: (Float) -> Unit
     val assistant = remember { CalibrationAssistant() }
     var cap by remember { mutableStateOf<CaptureView?>(null) }
     var msg by remember { mutableStateOf("") }
+    var isCalibrating by remember { mutableStateOf(false) }
 
     Text(
         "Toque em um botão e, durante 4 s, faça UM movimento de ida com o mouse na distância que deve " +
@@ -499,26 +611,70 @@ private fun Calibrator(target: Float, onX: (Float) -> Unit, onY: (Float) -> Unit
         },
         modifier = Modifier.size(1.dp)
     )
+    val captureView = cap
+    DisposableEffect(captureView) {
+        val viewToStop = captureView
+        onDispose { runCatching { viewToStop?.stop() } }
+    }
 
     fun run(horizontal: Boolean) {
-        val v = cap ?: return
+        if (isCalibrating) return
+        val v = cap
+        if (v == null) {
+            msg = "Captura de entrada ainda não está disponível. Feche e reabra esta tela."
+            return
+        }
+        if (!target.isFinite() || target <= 0f) {
+            msg = "Alvo de calibração inválido. Revise a configuração e tente novamente."
+            return
+        }
         val dh = DisplayHelper(ctx)
-        val size = dh.size(dh.target())
+        val size = try {
+            dh.size(dh.target())
+        } catch (error: Exception) {
+            msg = "Monitor indisponível: ${error.message ?: error.javaClass.simpleName}"
+            return
+        }
+        val axisPixels = (if (horizontal) size.x else size.y).takeIf { it > 0 }
+        if (axisPixels == null) {
+            msg = "Não foi possível obter as dimensões do monitor selecionado."
+            return
+        }
+        val targetPixels = axisPixels.toFloat() * target
+        if (!targetPixels.isFinite() || targetPixels <= 0f) {
+            msg = "A distância de calibração calculada é inválida."
+            return
+        }
+
         assistant.reset()
         msg = "Mova o mouse agora..."
+        isCalibrating = true
         Haptics.tick(view)
-        v.start()
+        try {
+            v.start()
+        } catch (error: Exception) {
+            isCalibrating = false
+            msg = "Não foi possível iniciar a captura: ${error.message ?: error.javaClass.simpleName}"
+            return
+        }
         scope.launch {
-            delay(4000)
-            v.stop()
-            val px = (if (horizontal) size.x else size.y) * target
-            val s = if (horizontal) assistant.suggestX(px) else assistant.suggestY(px)
-            if (s == null) {
-                msg = "Nenhum movimento detectado. Tente de novo."
-            } else {
-                msg = "Sensibilidade sugerida: ${String.format(Locale.US, "%.2f", s)}"
-                if (horizontal) onX(s) else onY(s)
-                Haptics.tick(view)
+            try {
+                delay(4000)
+                val suggestion = if (horizontal) assistant.suggestX(targetPixels) else assistant.suggestY(targetPixels)
+                if (suggestion == null) {
+                    msg = "Nenhum movimento detectado. Tente de novo."
+                } else {
+                    msg = "Sensibilidade sugerida: ${String.format(Locale.US, "%.2f", suggestion)}"
+                    if (horizontal) onX(suggestion) else onY(suggestion)
+                    Haptics.tick(view)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                msg = "Falha na calibração: ${error.message ?: error.javaClass.simpleName}"
+            } finally {
+                runCatching { v.stop() }
+                isCalibrating = false
             }
         }
     }
@@ -527,8 +683,12 @@ private fun Calibrator(target: Float, onX: (Float) -> Unit, onY: (Float) -> Unit
         Modifier.padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Button(onClick = { run(true) }, modifier = Modifier.weight(1f)) { Text("Calibrar X") }
-        Button(onClick = { run(false) }, modifier = Modifier.weight(1f)) { Text("Calibrar Y") }
+        Button(onClick = { run(true) }, enabled = !isCalibrating, modifier = Modifier.weight(1f)) {
+            Text(if (isCalibrating) "Calibrando..." else "Calibrar X")
+        }
+        Button(onClick = { run(false) }, enabled = !isCalibrating, modifier = Modifier.weight(1f)) {
+            Text(if (isCalibrating) "Calibrando..." else "Calibrar Y")
+        }
     }
     if (msg.isNotEmpty()) Text(msg, modifier = Modifier.padding(horizontal = 16.dp))
 }
@@ -701,8 +861,8 @@ private fun HudTab(d: AppSettings, edit: Edit) {
 
     Section("Mouse virtual e retículo")
     SwitchRow(
-        "Mostrar retículo fixo durante a captura",
-        "O motor de mouse virtual processa os deltas independentemente deste desenho. Este ajuste controla apenas o indicador visual fixo no ponto de referência da visão; ele só aparece após o Android confirmar Pointer Capture e não caminha até as bordas.",
+        "Mostrar retículo durante a captura",
+        "O retículo acompanha os deltas relativos do mouse. Ao cruzar um limite do display, ele reancora no ponto de referência e continua com o excedente; a posição lógica não é limitada pelas dimensões da tela. Aparece quando a captura evdev ou Pointer Capture está ativa.",
         d.cursorVisible
     ) { v -> edit { it.copy(cursorVisible = v) } }
     DropdownRow(
@@ -765,46 +925,65 @@ private fun AimTab(d: AppSettings, edit: Edit) {
         d.globalSens, 0.2f, 3f, 0.05f, absMin = 0f, absMax = 1000f
     ) { v -> edit { it.copy(globalSens = v) } }
     SliderRow(
-        "Tamanho da área de câmera", "Define o tamanho visual da zona de visão no editor. No modo com reancoragem, o contato touchscreen é recriado dentro da área para permitir movimentos contínuos sem mover o cursor físico de volta ao centro.",
+        "Tamanho da área de câmera", "Define o raio visual e de interação da zona Sight no HUD/editor. Não altera o limite físico de injeção nem o intervalo de recentralização do toque.",
         d.lookR, 0.05f, 0.9f, 0.01f, absMin = 0.02f, absMax = 1f
     ) { v -> edit { it.copy(lookR = v) } }
     SliderRow(
         "Agrupamento da câmera (ms)", "Cada amostra é transformada pela sensibilidade usando seu timestamp antes da agregação. Este intervalo agrupa somente a saída já calibrada; o injetor limita movimentos a cerca de 120 Hz. Valores menores não garantem 250 Hz.",
         d.lookIntervalMs.toFloat(), 1f, 16f, 1f, "%.0f", absMin = 1f, absMax = 20f
     ) { v -> edit { it.copy(lookIntervalMs = v.toInt()) } }
-    DropdownRow(
-        "Comportamento da câmera",
-        "Define o método de saída da visão. A reancoragem por toque evita exigir que o mouse físico retorne ao centro, mas a troca de contato pode causar uma pequena interrupção em alguns jogos. Mouse relativo nativo só funciona quando o destino aceita esse tipo de evento. Cada botão de mira pode sobrescrever o modo global.",
-        listOf(
-            Rot.AUTO to "Automático (toque contínuo com reancoragem)",
-            Rot.CENTER to "Toque contínuo com reancoragem",
-            Rot.INFINITE to "Mouse relativo nativo (destinos compatíveis)",
-            Rot.OFF to "Desligado (para na borda)"
-        ),
-        d.lookMode
-    ) { v -> edit { it.copy(lookMode = v) } }
-    Text(
-        when (d.lookMode) {
-            Rot.AUTO -> "Recomendado para jogos controlados por toque: converte os deltas do mouse em arrasto touchscreen e reancora o contato quando alcança a margem. O movimento excedente é preservado; alguns jogos podem apresentar uma pequena pausa na troca de contato."
-            Rot.INFINITE -> "Envia eventos SOURCE_MOUSE_RELATIVE. Use somente em destinos que aceitam mouse relativo nativo; jogos controlados por toque podem ignorar esses eventos."
-            Rot.OFF -> "Desligado: usa arrasto de toque limitado à área; a visão para na borda."
-            else -> "Arrasto de toque com reancoragem: move o contato até a margem, libera e recria no ponto de referência, sem exigir que o mouse físico retorne ao centro. A continuidade visual depende de como o jogo reage à troca de contato."
-        },
-        modifier = Modifier.padding(horizontal = 16.dp),
-        style = MaterialTheme.typography.bodySmall
-    )
-    if (d.lookMode != Rot.OFF) {
+    val continuousLookEnabled = d.lookMode != Rot.OFF
+    val selectedContinuousMode = when {
+        d.relativeMouse || d.lookMode == Rot.INFINITE -> Rot.INFINITE
+        d.lookMode == Rot.NONSTOP -> Rot.NONSTOP
+        else -> Rot.AUTO // CENTER é um valor legado com a mesma política segura.
+    }
+    SwitchRow(
+        "Movimento contínuo da câmera",
+        "Define o padrão global. Cada controle Sight/Aim pode sobrescrever a estratégia nas propriedades. Desligado, o contato fica limitado à área.",
+        continuousLookEnabled
+    ) { enabled -> edit {
+        it.copy(
+            lookMode = if (enabled) {
+                if (it.lookMode == Rot.OFF) Rot.AUTO else it.lookMode
+            } else Rot.OFF,
+            relativeMouse = false
+        )
+    } }
+    if (continuousLookEnabled) {
+        DropdownRow(
+            "Modo de recentralização",
+            "Automático usa UP/DOWN e oferece maior compatibilidade. Nonstop mantém pelo menos um contato ativo: cria o novo ponteiro antes de soltar o antigo; alguns jogos interpretam isso como multitouch. Relativo nativo não injeta toques, mas só funciona se o destino aceitar SOURCE_MOUSE_RELATIVE.",
+            listOf(
+                Rot.AUTO to "Automático (maior compatibilidade)",
+                Rot.NONSTOP to "Nonstop (handover sem zero contatos)",
+                Rot.INFINITE to "Mouse relativo nativo (sem reancoragem)"
+            ),
+            selectedContinuousMode
+        ) { v -> edit { it.copy(lookMode = v, relativeMouse = false) } }
+        Text(
+            when (selectedContinuousMode) {
+                Rot.NONSTOP -> "Nonstop: o motor envia POINTER_DOWN no novo ponto antes de POINTER_UP no antigo. Não há intervalo sem contato, mas o jogo recebe temporariamente dois ponteiros; teste a compatibilidade do jogo."
+                Rot.INFINITE -> "Relativo nativo: envia SOURCE_MOUSE_RELATIVE sem coordenadas absolutas de tela. Não depende de recentralização, mas o jogo precisa aceitar essa origem de mouse."
+                else -> "Automático: ao atingir a margem, move o contato até a borda, envia UP e cria outro DOWN no ponto de referência. Preserva o excedente, mas alguns jogos podem perceber a transição."
+            },
+            modifier = Modifier.padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.bodySmall
+        )
+    } else {
+        Text(
+            "Limite ativo: a visão para na margem da área. Ative o movimento contínuo para usar recentralização ou entrada relativa.",
+            modifier = Modifier.padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+    if (continuousLookEnabled && selectedContinuousMode != Rot.INFINITE) {
         SliderRow(
             "Manter contato da câmera após inatividade (ms)",
             "Padrão 0: mantém o contato até desativar ou pausar, evitando recomeçar o gesto após pequenas pausas. Valores positivos liberam o toque depois desse tempo sem movimento; o próximo movimento inicia um novo contato no ponto de referência.",
             d.lookIdleMs.toFloat(), 0f, 3000f, 100f, "%.0f", absMin = 0f, absMax = 60000f
         ) { v -> edit { it.copy(lookIdleMs = v.toInt()) } }
     }
-    SwitchRow(
-        "Forçar mouse relativo nativo",
-        "Ativa a saída SOURCE_MOUSE_RELATIVE em vez de arrasto touchscreen com reancoragem. Use somente se o aplicativo de destino aceitar mouse relativo nativo; muitos jogos Android controlados por toque ignoram essa entrada.",
-        d.relativeMouse
-    ) { v -> edit { it.copy(relativeMouse = v) } }
     Section("Botões de mira")
     val aims = d.buttons.filter { it.kind == Kind.AIM }
     if (aims.isEmpty()) {
@@ -844,10 +1023,10 @@ private fun PerfTab(d: AppSettings, edit: Edit, hw: Hw) {
 
     Section("Modo de desempenho")
     DropdownRow(
-        "Modo", "Aplica ao reiniciar o serviço.",
+        "Modo", "Atualiza a folga do motor sem alterar a sensibilidade ou a ordem dos eventos.",
         listOf(0 to "Equilibrado", 1 to "Alta performance", 2 to "Economia"), d.perfMode
     ) { v -> edit { it.copy(perfMode = v) } }
-    InfoRow("Folga entre eventos", "$delay ms")
+    InfoRow("Folga efetiva do motor", "$delay ms adicionais")
     InfoRow("Prioridade da injeção", "URGENT_DISPLAY (máxima)")
     InfoRow("RAM detectada", "${hw.ramGb} GB" + if (low && d.perfMode == 0) " (folga automática de 5 ms)" else "")
     Text(
@@ -936,10 +1115,12 @@ private fun SystemTab(
     SwitchRow("Iniciar ao ligar o celular", "Sobe o serviço depois do boot.", d.autoStart) { v -> edit { it.copy(autoStart = v) } }
 
     Section("Diagnóstico")
+    val inputDevices = InputDeviceManager.snapshot()
+    InfoRow("Estado do mapeamento", InputDiagnostics.healthHint(inputDevices.hasMouse))
     InfoRow("Entrada recente", InputDiagnostics.summary())
-    InfoRow("Periféricos reconhecidos", InputDeviceManager.snapshot().summary())
-    InfoRow("Teclado físico", if (InputDeviceManager.snapshot().hasPhysicalKeyboard) "detectado" else "não detectado")
-    InfoRow("Mouse físico", if (InputDeviceManager.snapshot().hasMouse) "detectado" else "não detectado")
+    InfoRow("Periféricos reconhecidos", inputDevices.summary())
+    InfoRow("Teclado físico", if (inputDevices.hasPhysicalKeyboard) "detectado" else "não detectado")
+    InfoRow("Mouse físico", if (inputDevices.hasMouse) "detectado" else "não detectado")
     InfoRow("Ambiente de tela", when { hw.dex -> "modo desktop reportado pelo Android"; hw.external -> "monitor externo; DeX não confirmado"; else -> "tela do dispositivo" })
     InfoRow("Versão do app", version)
     InfoRow("Aparelho", hw.name)
@@ -960,14 +1141,21 @@ private fun SystemTab(
             appendLine("Fabricante: ${Build.MANUFACTURER}")
             appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine("Tela: ${hw.res} @ ${hw.dpi} dpi, ${hw.hz} Hz | RAM: ${hw.ramGb} GB | modo desktop: ${hw.dex} | monitor externo: ${hw.external}")
-            appendLine("Periféricos: ${InputDeviceManager.snapshot().summary()}")
+            appendLine("Periféricos: ${inputDevices.summary()}")
             appendLine("Shizuku: ${stateLabel(state)} | Overlay permitido: $overlayOk | Serviço ativo: $running")
             appendLine("App version: $version")
             appendLine()
+            appendLine("Estado do mapeamento: ${InputDiagnostics.healthHint(inputDevices.hasMouse)}")
             appendLine(InputDiagnostics.report())
             appendLine()
             appendLine("ÚLTIMO CRASH REGISTRADO")
             appendLine(CrashReporter.lastCrash(ctx))
+            appendLine()
+            appendLine("HISTÓRICO DE ENCERRAMENTO REGISTRADO PELO ANDROID")
+            appendLine(CrashReporter.processExitHistory(ctx))
+            appendLine()
+            appendLine("DIAGNÓSTICO DE REINICIALIZAÇÃO")
+            appendLine(RestartDiagnostics.report(ctx))
         }
         shareText(ctx, "KeyMapper — Relatório de erro", text, "Compartilhar relatório de erro")
     }
@@ -997,58 +1185,81 @@ private fun shareText(ctx: Context, subject: String, text: String, chooserTitle:
 
 @Composable
 private fun Section(title: String) {
-    Text(
-        title.uppercase(),
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 4.dp, top = 22.dp, end = 4.dp, bottom = 7.dp)
-    )
+    Row(
+        Modifier.fillMaxWidth().padding(start = 3.dp, top = 20.dp, end = 3.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp)
+    ) {
+        Surface(
+            modifier = Modifier.width(4.dp).height(18.dp),
+            color = MaterialTheme.colorScheme.primary,
+            shape = RoundedCornerShape(50)
+        ) {}
+        Text(
+            title.uppercase(),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
 }
 
-private val transparent @Composable get() = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface)
+private val transparent @Composable get() = ListItemDefaults.colors(containerColor = Color.Transparent)
+
+@Composable
+private fun SettingsRowSurface(content: @Composable () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+    ) { content() }
+}
 
 @Composable
 private fun InfoRow(title: String, value: String) {
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        trailingContent = { Text(value, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) },
-        colors = transparent
-    )
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+    SettingsRowSurface {
+        ListItem(
+            headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+            trailingContent = { Text(value, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) },
+            colors = transparent
+        )
+    }
 }
 
 @Composable
 private fun SwitchRow(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     val view = LocalView.current
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-        trailingContent = {
-            Switch(checked = checked, onCheckedChange = {
-                Haptics.tick(view)
-                onChange(it)
-            })
-        },
-        colors = transparent
-    )
-    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.28f))
+    SettingsRowSurface {
+        ListItem(
+            headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+            supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            trailingContent = {
+                Switch(checked = checked, onCheckedChange = {
+                    Haptics.tick(view)
+                    onChange(it)
+                })
+            },
+            colors = transparent
+        )
+    }
 }
 
 @Composable
 private fun ActionRow(title: String, sub: String, label: String, onClick: () -> Unit) {
     val view = LocalView.current
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-        trailingContent = {
-            OutlinedButton(onClick = {
-                Haptics.tick(view)
-                onClick()
-            }) { Text(label) }
-        },
-        colors = transparent
-    )
-    HorizontalDivider()
+    SettingsRowSurface {
+        ListItem(
+            headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+            supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            trailingContent = {
+                OutlinedButton(onClick = {
+                    Haptics.tick(view)
+                    onClick()
+                }) { Text(label) }
+            },
+            colors = transparent
+        )
+    }
 }
 
 @Composable
@@ -1058,28 +1269,29 @@ private fun <T> DropdownRow(
 ) {
     val view = LocalView.current
     var open by remember { mutableStateOf(false) }
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-        trailingContent = {
-            Box {
-                TextButton(onClick = { open = true }) {
-                    Text(options.firstOrNull { it.first == selected }?.second ?: placeholder)
-                }
-                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    options.forEach { (value, label) ->
-                        DropdownMenuItem(text = { Text(label) }, onClick = {
-                            Haptics.tick(view)
-                            onSelect(value)
-                            open = false
-                        })
+    SettingsRowSurface {
+        ListItem(
+            headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+            supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            trailingContent = {
+                Box {
+                    TextButton(onClick = { open = true }) {
+                        Text(options.firstOrNull { it.first == selected }?.second ?: placeholder, maxLines = 2)
+                    }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        options.forEach { (value, label) ->
+                            DropdownMenuItem(text = { Text(label) }, onClick = {
+                                Haptics.tick(view)
+                                onSelect(value)
+                                open = false
+                            })
+                        }
                     }
                 }
-            }
-        },
-        colors = transparent
-    )
-    HorizontalDivider()
+            },
+            colors = transparent
+        )
+    }
 }
 
 /** Slider com [−] [+] e campo numérico: digite o valor exato (até [absMax], além do alcance do slider). */
@@ -1094,48 +1306,52 @@ private fun SliderRow(
         val p = text.replace(',', '.').toFloatOrNull()
         if (p == null || abs(p - value) > 0.001f) text = String.format(Locale.US, fmt, value)
     }
-    ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-        supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-        trailingContent = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { t ->
-                    text = t
-                    t.replace(',', '.').toFloatOrNull()?.let { onChange(it.coerceIn(absMin, absMax)) }
+    SettingsRowSurface {
+        Column(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+            ListItem(
+                headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+                supportingContent = { Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                trailingContent = {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { t ->
+                            text = t
+                            t.replace(',', '.').toFloatOrNull()?.let { onChange(it.coerceIn(absMin, absMax)) }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.width(104.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.width(104.dp)
+                colors = transparent
             )
-        },
-        colors = transparent
-    )
-    Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedButton(
-            onClick = {
-                Haptics.tick(view)
-                onChange((value - step).coerceIn(absMin, absMax))
-            },
-            contentPadding = PaddingValues(0.dp),
-            modifier = Modifier.size(36.dp)
-        ) { Text("-") }
-        Slider(
-            value = value.coerceIn(min, max),
-            onValueChange = { onChange(((it / step).roundToInt() * step).coerceIn(absMin, absMax)) },
-            onValueChangeFinished = { Haptics.tick(view) },
-            valueRange = min..max,
-            modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-        )
-        OutlinedButton(
-            onClick = {
-                Haptics.tick(view)
-                onChange((value + step).coerceIn(absMin, absMax))
-            },
-            contentPadding = PaddingValues(0.dp),
-            modifier = Modifier.size(36.dp)
-        ) { Text("+") }
+            Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = {
+                        Haptics.tick(view)
+                        onChange((value - step).coerceIn(absMin, absMax))
+                    },
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.size(36.dp)
+                ) { Text("−") }
+                Slider(
+                    value = value.coerceIn(min, max),
+                    onValueChange = { onChange(((it / step).roundToInt() * step).coerceIn(absMin, absMax)) },
+                    onValueChangeFinished = { Haptics.tick(view) },
+                    valueRange = min..max,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                )
+                OutlinedButton(
+                    onClick = {
+                        Haptics.tick(view)
+                        onChange((value + step).coerceIn(absMin, absMax))
+                    },
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.size(36.dp)
+                ) { Text("+") }
+            }
+        }
     }
-    HorizontalDivider()
 }

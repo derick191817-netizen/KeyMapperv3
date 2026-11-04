@@ -1,24 +1,64 @@
 name: Build APK
-on: [push, workflow_dispatch]
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keymapper-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Compilar APK Debug
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v4
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Configurar Android SDK 34
+        uses: android-actions/setup-android@v4
         with:
-          gradle-version: '8.9'
-      - name: Instalar SDK
-        run: yes | sdkmanager "platforms;android-34" "build-tools;34.0.0"
-      - name: Compilar APK
-        run: gradle :app:assembleDebug --stacktrace
-      - name: Guardar APK
+          packages: 'platforms;android-34 build-tools;34.0.0 ndk;26.3.11579264 cmake;3.22.1'
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Preparar Gradle Wrapper
+        run: chmod +x ./gradlew
+
+      - name: Validar políticas nativas no host
+        run: |
+          bash ./tools/native-tests/run.sh
+          bash ./tools/native-tests/check-syntax.sh
+          bash ./tools/native-tests/check-library-contract.sh
+
+      - name: Executar análise estática Android (Lint)
+        run: ./gradlew --no-daemon :app:lintDebug --stacktrace --console=plain
+
+      - name: Executar testes unitários
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --stacktrace --console=plain
+
+      - name: Gerar APK Debug
+        run: ./gradlew --no-daemon :app:assembleDebug --stacktrace --console=plain
+
+      - name: Publicar APK Debug
         uses: actions/upload-artifact@v4
         with:
-          name: keymapper-debug
+          name: keymapper-0.14.46-debug
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

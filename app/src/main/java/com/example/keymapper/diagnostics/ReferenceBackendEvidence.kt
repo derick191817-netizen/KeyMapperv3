@@ -1,12 +1,12 @@
 package com.example.keymapper.diagnostics
 
 /**
- * Evidência estática extraída dos APKs/XAPK de referência reenviados em 31/10/2026.
+ * Evidência estática extraída dos APKs/XAPK de referência reenviados em 02/11/2026.
  * Strings/símbolos descrevem o que existe no pacote; não provam autorização ou runtime.
  */
 object ReferenceBackendEvidence {
     fun report(): String = buildString {
-        appendLine("ANÁLISE ESTÁTICA DOS PACOTES DE REFERÊNCIA (31/10/2026; não é estado runtime)")
+        appendLine("ANÁLISE ESTÁTICA DOS PACOTES DE REFERÊNCIA (02/11/2026; não é estado runtime)")
         appendLine("Panda Mouse Pro 11 (package com.panda.mouse; min API 23, target 36): SHA-256 da amostra reenviada no ZIP = f09f329a3661c8ec0d9d4845b5ac7096e59ada1527dd2e59a70ab43ea27910fb; corresponde byte a byte à amostra Panda já inspecionada anteriormente, portanto o ZIP novo não contém uma release diferente.")
         appendLine("Panda: assets contêm com.panda.mouseinject.dex (477.044 bytes), com.panda.mouselibinject.so (ELF32 ARM, 40.892 bytes), x64com.panda.mouselibinject.so (ELF64 AArch64, 61.544 bytes) e x86_64com.panda.mouselibinject.so (ELF64 x86-64, 60.728 bytes). Não são bibliotecas colocadas em lib/<abi>/.")
         appendLine("Panda: imports das variantes incluem open/ioctl/poll/read/write/inotify, opendir/readdir e popen/pclose; strings incluem /dev/input e uma tabela ampla de códigos Linux ABS_*, REL_* e BTN_*. O binário também contém strings de opções de inspeção/contagem/diagnóstico de eventos, mas isso não identifica sozinho o fluxo de execução usado pelo app.")
@@ -25,9 +25,9 @@ object ReferenceBackendEvidence {
         appendLine("GG: isso sustenta a arquitetura de serviço/processo auxiliar com ponte nativa, mas os arquivos estáticos não provam qual caminho de autorização foi usado numa sessão nem se o grab teve sucesso.")
         appendLine("SS e GG demonstram módulos de captura nativa distintos; Panda demonstra biblioteca embarcada com leitores e serviços dedicados. Nenhum binário de referência foi incorporado ao KeyMapper.")
         appendLine("Limite: símbolo JNI, import de ioctl, /dev/input visível ou autorização Shizuku/ADB não provam permissão de abrir/grabar o dispositivo, escrever em uinput ou entregar eventos ao jogo.")
-        appendLine("KeyMapper 0.14.13: Pointer Capture continua limitado à janela focada; o app ainda não possui backend evdev/uinput próprio nem processo auxiliar de captura nativa. O estado físico é agregado por deviceId, teclas/botões compartilhados só são liberados quando o último dispositivo os solta, movimentos/scroll pendentes da origem removida são descartados, o relógio de sensibilidade e o acumulador de scroll são independentes por mouse.")
-        appendLine("KeyMapper 0.14.13: estados relativos agora separam RELATIVE_ACTIVE (Pointer Capture confirmado) de RELATIVE_FALLBACK_ACTIVE (eixos relativos recebidos por generic MotionEvent sem Pointer Capture). O timeout de captura não gera erro falso quando a rota relativa alternativa já está entregando amostras.")
-        appendLine("KeyMapper 0.14.13: a expiração de movimento >50 ms é verificada em cada lote, inclusive quando há menos de 256 eventos; a fila retorna rapidamente sem compactar se sua amostra de mouse mais antiga ainda for recente; a primeira amostra após pausa longa reinicia corretamente a janela temporal.")
+        appendLine("KeyMapper 0.14.28: Pointer Capture continua limitado à janela focada; o app ainda não possui backend evdev/uinput próprio nem processo auxiliar de captura nativa. O estado físico é agregado por deviceId, teclas/botões compartilhados só são liberados quando o último dispositivo os solta, movimentos/scroll pendentes da origem removida são descartados, o relógio de sensibilidade e o acumulador de scroll são independentes por mouse.")
+        appendLine("KeyMapper 0.14.28: estados relativos agora separam RELATIVE_ACTIVE (Pointer Capture confirmado) de RELATIVE_FALLBACK_ACTIVE (eixos relativos recebidos por generic MotionEvent sem Pointer Capture). O timeout de captura não gera erro falso quando a rota relativa alternativa já está entregando amostras.")
+        appendLine("KeyMapper 0.14.28: a expiração de movimento >50 ms é verificada em cada lote, inclusive quando há menos de 256 eventos; a fila retorna rapidamente sem compactar se sua amostra de mouse mais antiga ainda for recente; a primeira amostra após pausa longa reinicia corretamente a janela temporal.")
         appendLine("Conclusão: captura global e saída uinput nativa continuam NÃO IMPLEMENTADAS/NÃO VALIDADAS no KeyMapper.")
     }
 }

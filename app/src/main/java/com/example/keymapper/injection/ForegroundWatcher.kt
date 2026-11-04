@@ -4,8 +4,10 @@ import android.app.ActivityManager
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import java.lang.reflect.InvocationTargetException
 import android.os.Looper
 import android.util.Log
+import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 
@@ -24,10 +26,30 @@ class ForegroundWatcher(private val onChange: (String?) -> Unit) {
     @Volatile private var generation = 0L
     @Volatile private var last: String? = "?"
     @Volatile private var atm: Any? = null
+    @Volatile private var atmBinder: IBinder? = null
+    private var lastBinderWarningAt = 0L
+
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        atm = null
+        atmBinder = null
+        supported = false
+    }
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        atm = null
+        atmBinder = null
+        supported = false
+    }
 
     @Volatile
     var supported = false
         private set
+
+    init {
+        runCatching { Shizuku.addBinderReceivedListenerSticky(binderReceivedListener) }
+            .onFailure { Log.w(TAG, "Não foi possível observar a reconexão do Shizuku", it) }
+        runCatching { Shizuku.addBinderDeadListener(binderDeadListener) }
+            .onFailure { Log.w(TAG, "Não foi possível observar a queda do Shizuku", it) }
+    }
 
     fun start() {
         if (running) return
@@ -46,6 +68,8 @@ class ForegroundWatcher(private val onChange: (String?) -> Unit) {
 
     fun shutdown() {
         stop()
+        runCatching { Shizuku.removeBinderReceivedListener(binderReceivedListener) }
+        runCatching { Shizuku.removeBinderDeadListener(binderDeadListener) }
         thread.quitSafely()
     }
 
@@ -70,13 +94,20 @@ class ForegroundWatcher(private val onChange: (String?) -> Unit) {
     }
 
     private fun service(): Any? {
-        atm?.let { return it }
+        val cached = atm
+        val cachedBinder = atmBinder
+        if (cached != null && cachedBinder?.isBinderAlive == true) return cached
+        atm = null
+        atmBinder = null
         return try {
             val binder = SystemServiceHelper.getSystemService("activity_task") ?: return null
-            Class.forName("android.app.IActivityTaskManager\$Stub")
+            val proxy = Class.forName("android.app.IActivityTaskManager\$Stub")
                 .getMethod("asInterface", IBinder::class.java)
                 .invoke(null, ShizukuBinderWrapper(binder))
-                .also { atm = it }
+                ?: return null
+            atmBinder = binder
+            atm = proxy
+            proxy
         } catch (e: Exception) {
             Log.w(TAG, "A API de tarefas em primeiro plano não está disponível", e)
             null
@@ -86,9 +117,20 @@ class ForegroundWatcher(private val onChange: (String?) -> Unit) {
     private fun call(service: Any, types: Array<Class<*>>, args: Array<Any>): List<*>? = try {
         service.javaClass.getMethod("getTasks", *types).invoke(service, *args) as? List<*>
     } catch (_: NoSuchMethodException) {
+        // Firmware pode expor outra assinatura; topPackage() tenta as alternativas suportadas.
         null
     } catch (e: Exception) {
-        Log.w(TAG, "Falha ao consultar tarefas em primeiro plano", e)
+        // Binder morto/permissão revogada: não mantenha um proxy obsoleto para sempre.
+        // A próxima amostra (1 s) tentará obter novamente o serviço activity_task.
+        atm = null
+        atmBinder = null
+        supported = false
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastBinderWarningAt >= 5_000L) {
+            lastBinderWarningAt = now
+            val cause = (e as? InvocationTargetException)?.targetException ?: e
+            Log.w(TAG, "Falha ao consultar tarefas; proxy será renovado na próxima amostra", cause)
+        }
         null
     }
 
@@ -106,6 +148,7 @@ class ForegroundWatcher(private val onChange: (String?) -> Unit) {
         } catch (e: Exception) {
             Log.w(TAG, "Falha ao interpretar o aplicativo em primeiro plano", e)
             atm = null // binder/API pode ter mudado; tenta restabelecer no próximo ciclo
+            atmBinder = null
             supported = false
             null
         }

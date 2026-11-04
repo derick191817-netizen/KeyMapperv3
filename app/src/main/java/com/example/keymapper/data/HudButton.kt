@@ -19,22 +19,6 @@ object Mode {
     const val DOUBLE = 3     // duplo toque: um aperto = dois toques curtos
 }
 
-/** Modo de visão. O modo AUTO prioriza a saída touchscreen com reancoragem. */
-object Rot {
-    const val CENTER = 0     // Arrasto touchscreen contínuo com reancoragem dentro da área
-    const val INFINITE = 1   // Eventos SOURCE_MOUSE_RELATIVE para destinos que aceitam mouse nativo
-    const val OFF = 2        // Arrasto touchscreen limitado à borda
-    const val AUTO = 3       // Padrão: saída de toque com reancoragem; relativo nativo é explícito
-
-    fun label(m: Int): String = when (m) {
-        AUTO -> "Automático (toque contínuo com reancoragem)"
-        CENTER -> "Toque contínuo com reancoragem"
-        INFINITE -> "Mouse relativo nativo (compatível)"
-        OFF -> "Desligado (para na borda)"
-        else -> "Usar o global"
-    }
-}
-
 /** Teclas do mouse usam códigos negativos: M1..M5 = -1..-5. */
 fun keyLabel(code: Int): String = when (code) {
     0 -> "Sem tecla"
@@ -65,8 +49,12 @@ data class HudButton(
     val aimSensY: Float = 0.9f,
     val aimToggle: Boolean = false,   // suspender: um toque liga a mira, o próximo desliga
     val mouseAim: Boolean = true,     // mouse move a câmera enquanto mira
-    val rotMode: Int = -1,            // modo desta mira (-1 = global; AUTO/CENTER=reancoragem, INFINITE=relativo nativo, OFF=limitado)
+    val rotMode: Int = -1,            // -1 = global; AUTO/CENTER=UP/DOWN, NONSTOP=handover multitouch, INFINITE=relativo, OFF=Boundary
     val aimDeadzone: Float = 0f,
+    // 0 = bordas da área atual; >0 = raio de recentralização como no Aiming Mode do K2er.
+    val aimBoundaryRadiusPct: Float = 0f,
+    // -1 = herda AppSettings.lookIdleMs; 0 = mantém contato; >0 = liberação automática em ms.
+    val aimAutoReleaseMs: Int = -1,
     val shootKey: Int = -1,           // tecla de tiro associada a esta mira
     val shootSensX: Float = 1f,       // multiplicador extra enquanto a tecla de tiro está pressionada
     val shootSensY: Float = 1f,
@@ -93,6 +81,8 @@ data class HudButton(
         put("aimSensX", aimSensX.toDouble()); put("aimSensY", aimSensY.toDouble())
         put("aimToggle", aimToggle); put("mouseAim", mouseAim); put("rotMode", rotMode)
         put("aimDeadzone", aimDeadzone.toDouble())
+        put("aimBoundaryRadiusPct", aimBoundaryRadiusPct.toDouble())
+        put("aimAutoReleaseMs", aimAutoReleaseMs)
         put("shootKey", shootKey)
         put("shootSensX", shootSensX.toDouble()); put("shootSensY", shootSensY.toDouble())
         put("aimGeneral", aimGeneral.toDouble()); put("aimMouseSens", aimMouseSens.toDouble())
@@ -180,8 +170,12 @@ data class HudButton(
                 aimSensY = finiteFloat("aimSensY", 0.9f, 0.01f, 100f),
                 aimToggle = b.optBoolean("aimToggle", false),
                 mouseAim = b.optBoolean("mouseAim", true),
-                rotMode = b.optInt("rotMode", -1).coerceIn(-1, 3),
+                rotMode = b.optInt("rotMode", -1).coerceIn(-1, Rot.NONSTOP),
                 aimDeadzone = finiteFloat("aimDeadzone", 0f, 0f, 100f),
+                aimBoundaryRadiusPct = finiteFloat("aimBoundaryRadiusPct", 0f, 0f, 45f),
+                aimAutoReleaseMs = b.optInt("aimAutoReleaseMs", -1).let { raw ->
+                    if (raw == -1) -1 else raw.coerceIn(0, 60_000)
+                },
                 shootKey = b.optInt("shootKey", -1).let { code ->
                     if (code == 0 || code in -5..-1 || code in 1..KeyEvent.getMaxKeyCode()) code else -1
                 },

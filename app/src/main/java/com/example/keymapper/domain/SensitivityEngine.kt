@@ -9,8 +9,10 @@ import kotlin.math.pow
  * Entradas anormais são neutralizadas para que NaN/Infinity não contaminem chamadas futuras.
  */
 class SensitivityEngine {
-    private var remX = 0f
-    private var remY = 0f
+    // A fração é guardada em Double: manter Float aqui pode transformar -0.99999994 em
+    // zero no truncamento para Int, criando um pequeno viés direcional em sensibilidades baixas.
+    private var remX = 0.0
+    private var remY = 0.0
     var outX = 0
         private set
     var outY = 0
@@ -42,15 +44,15 @@ class SensitivityEngine {
 
         // Mantém o delta físico da amostra; a curva modifica apenas o ganho, não a quantidade
         // de amostras por segundo. Assim, o deslocamento acumulado não depende do polling rate.
-        val tx = inputX * gain * safe(sx).toDouble() + remX.toDouble()
-        val ty = inputY * gain * safe(sy).toDouble() + remY.toDouble()
+        val tx = inputX * gain * safe(sx).toDouble() + remX
+        val ty = inputY * gain * safe(sy).toDouble() + remY
         writeOutputX(tx)
         writeOutputY(ty)
     }
 
     fun reset() {
-        remX = 0f
-        remY = 0f
+        remX = 0.0
+        remY = 0.0
         outX = 0
         outY = 0
     }
@@ -80,22 +82,22 @@ class SensitivityEngine {
                 value > 0 -> MAX_OUTPUT
                 else -> -MAX_OUTPUT
             }
-            remX = 0f
+            remX = 0.0
             return
         }
         if (value > MAX_OUTPUT.toDouble()) {
             outX = MAX_OUTPUT
-            remX = 0f
+            remX = 0.0
             return
         }
         if (value < -MAX_OUTPUT.toDouble()) {
             outX = -MAX_OUTPUT
-            remX = 0f
+            remX = 0.0
             return
         }
         val integer = value.toInt()
         outX = integer
-        remX = (value - integer.toDouble()).toFloat()
+        remX = value - integer.toDouble()
     }
 
     private fun writeOutputY(value: Double) {
@@ -105,22 +107,22 @@ class SensitivityEngine {
                 value > 0 -> MAX_OUTPUT
                 else -> -MAX_OUTPUT
             }
-            remY = 0f
+            remY = 0.0
             return
         }
         if (value > MAX_OUTPUT.toDouble()) {
             outY = MAX_OUTPUT
-            remY = 0f
+            remY = 0.0
             return
         }
         if (value < -MAX_OUTPUT.toDouble()) {
             outY = -MAX_OUTPUT
-            remY = 0f
+            remY = 0.0
             return
         }
         val integer = value.toInt()
         outY = integer
-        remY = (value - integer.toDouble()).toFloat()
+        remY = value - integer.toDouble()
     }
 
     private companion object {

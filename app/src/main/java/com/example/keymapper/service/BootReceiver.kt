@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import androidx.core.content.ContextCompat
+import com.example.keymapper.diagnostics.RestartDiagnostics
 import com.example.keymapper.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,13 +22,15 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 val auto = SettingsRepository(appContext).flow.first().autoStart
                 if (auto) {
-                    ContextCompat.startForegroundService(
-                        appContext,
-                        Intent(appContext, MappingService::class.java)
-                    )
+                    if (RestartDiagnostics.claimBootAutoStart(appContext)) {
+                        MappingService.requestStart(appContext)
+                    }
+                } else {
+                    RestartDiagnostics.recordEvent(appContext, "BootReceiver: autoStart desativado")
                 }
             } catch (e: Exception) {
                 // Do not retry in a loop: Android may prohibit foreground starts in this state.
+                RestartDiagnostics.recordEvent(appContext, "BootReceiver falhou: ${e.javaClass.simpleName}: ${e.message}")
                 Log.e("KeyMapper", "Falha ao processar a inicialização automática", e)
             } finally {
                 pending.finish()

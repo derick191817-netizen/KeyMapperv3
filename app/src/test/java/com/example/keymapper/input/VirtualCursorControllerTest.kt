@@ -29,11 +29,19 @@ class VirtualCursorControllerTest {
         assertEquals(0.0, cursor.position().y, 0.0)
     }
 
-    @Test fun extremeValuesRemainFiniteAndBoundedForIntegrity() {
+    @Test fun logicalPositionCanExceedAnyPhysicalDisplayDimension() {
+        val cursor = VirtualCursorController(1_000_000_000_000.0, -1_000_000_000_000.0)
+        val p = cursor.moveBy(25_000f, -25_000f)!!
+        assertEquals(1_000_000_025_000.0, p.x, 0.0)
+        assertEquals(-1_000_000_025_000.0, p.y, 0.0)
+    }
+
+    @Test fun extremeFloatMovementRemainsFiniteWithoutScreenSizedClamp() {
         val cursor = VirtualCursorController()
         val p = cursor.moveBy(Float.MAX_VALUE, Float.MAX_VALUE)!!
         assertTrue(p.x.isFinite() && p.y.isFinite())
-        assertTrue(p.x <= 1_000_000_000_000.0 && p.y <= 1_000_000_000_000.0)
+        assertEquals(Float.MAX_VALUE.toDouble(), p.x, 0.0)
+        assertEquals(Float.MAX_VALUE.toDouble(), p.y, 0.0)
     }
 
     @Test fun invalidAndZeroDeltasDoNotMoveCursor() {
@@ -58,5 +66,14 @@ class VirtualCursorControllerTest {
         val cursor = VirtualCursorController(3.0, 4.0)
         cursor.reset(Double.NaN, Double.POSITIVE_INFINITY)
         assertEquals(VirtualCursorController.Position(3.0, 4.0), cursor.position())
+    }
+
+    @Test fun advanceIntoUpdatesWithoutRequiringAnAllocatedMotionObject() {
+        val cursor = VirtualCursorController(10.0, 20.0)
+        val out = DoubleArray(2)
+        assertTrue(cursor.advanceInto(5f, -7f, out))
+        assertEquals(15.0, out[0], 0.0)
+        assertEquals(13.0, out[1], 0.0)
+        assertEquals(VirtualCursorController.Position(15.0, 13.0), cursor.position())
     }
 }

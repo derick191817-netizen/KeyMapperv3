@@ -19,6 +19,16 @@ class LookModePolicyTest {
         assertEquals(Rot.CENTER, LookModePolicy.resolve(Rot.OFF, Rot.CENTER, false))
     }
 
+
+    @Test fun nonstopModeIsPreservedForContinuousTouchHandoff() {
+        assertEquals(Rot.NONSTOP, LookModePolicy.resolve(Rot.NONSTOP, -1, false))
+        assertEquals(Rot.NONSTOP, LookModePolicy.resolve(Rot.AUTO, Rot.NONSTOP, false))
+    }
+
+    @Test fun nativeRelativePreferenceOverridesNonstopWhenExplicitlyForced() {
+        assertEquals(Rot.INFINITE, LookModePolicy.resolve(Rot.NONSTOP, -1, true))
+    }
+
     @Test fun offAlwaysWinsOverRelativePreference() {
         assertEquals(Rot.OFF, LookModePolicy.resolve(Rot.OFF, -1, true))
         assertEquals(Rot.OFF, LookModePolicy.resolve(Rot.AUTO, Rot.OFF, true))

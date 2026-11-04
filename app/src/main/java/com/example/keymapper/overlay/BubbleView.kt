@@ -35,14 +35,16 @@ class BubbleView(
     override fun onDraw(c: Canvas) {
         val r = width / 2f
         paint.style = Paint.Style.FILL
-        paint.color = if (active) Color.argb(235, 0, 140, 90) else Color.argb(180, 20, 20, 24)
+        paint.color = Color.argb(75, 0, 0, 0)
+        c.drawCircle(r + 1.5f * dp, r + 2.5f * dp, r - 1 * dp, paint)
+        paint.color = if (active) Color.rgb(20, 86, 82) else Color.rgb(13, 27, 39)
         c.drawCircle(r, r, r - 2 * dp, paint)
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 2 * dp
-        paint.color = Color.argb(200, 255, 255, 255)
+        paint.strokeWidth = 2.2f * dp
+        paint.color = if (active) Color.rgb(112, 224, 206) else Color.rgb(91, 151, 170)
         c.drawCircle(r, r, r - 2 * dp, paint)
         paint.style = Paint.Style.FILL
-        paint.color = Color.WHITE
+        paint.color = if (active) Color.rgb(180, 255, 237) else Color.rgb(222, 241, 248)
         paint.textSize = 26 * dp
         paint.textAlign = Paint.Align.CENTER
         c.drawText("⚙", r, r - (paint.descent() + paint.ascent()) / 2, paint)

@@ -82,6 +82,11 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
     private var aW = 1f
     private var aH = 1f
     private val loc = IntArray(2)
+    // O retículo de captura é desenhado nesta mesma janela HUD. Uma janela overlay separada
+    // sobre o ponto de ACTION_DOWN pode elevar a opacidade combinada e disparar BLOCK_UNTRUSTED_TOUCHES.
+    private var captureCursorVisible = false
+    private var captureCursorScreenX = 0f
+    private var captureCursorScreenY = 0f
 
     private companion object {
         const val NONE = -1000
@@ -104,6 +109,20 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
     private fun px(f: Float) = aL + f * aW
     private fun py(f: Float) = aT + f * aH
     private fun am() = min(aW, aH)
+
+    /** Atualiza a posição visual sem criar uma segunda janela TYPE_APPLICATION_OVERLAY. */
+    fun setCaptureCursorPosition(screenX: Float, screenY: Float, visible: Boolean) {
+        captureCursorScreenX = screenX
+        captureCursorScreenY = screenY
+        captureCursorVisible = visible
+        postInvalidateOnAnimation()
+    }
+
+    fun setCaptureCursorVisible(visible: Boolean) {
+        if (captureCursorVisible == visible) return
+        captureCursorVisible = visible
+        postInvalidateOnAnimation()
+    }
 
     /** Raio do botão em pixels (tamanho do botão × tamanho global). */
     private fun radius(b: HudButton, s: AppSettings) = b.size * b.visualScale * s.buttonScale * am() / 2
@@ -128,6 +147,7 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         val aimNow = host.activeAimId()
         if (aimNow >= 0) drawCrosshair(c, s, aimNow)
         else if (editing && selected >= 0) drawCrosshair(c, s, selected)
+        if (!editing) drawCaptureCursor(c, s)
         if (!editing && !s.showHud) return
         val m = am()
 
@@ -192,6 +212,50 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         c.drawCircle(cx, cy, 1.5f * dp, paint)
     }
 
+    /**
+     * Retículo de captura desenhado dentro do HUD existente. Isso evita uma segunda janela
+     * não confiável sobre o próprio ponto de toque virtual em Android 12+.
+     */
+    private fun drawCaptureCursor(c: Canvas, s: AppSettings) {
+        if (!captureCursorVisible || !s.cursorVisible) return
+        val cx = captureCursorScreenX - loc[0]
+        val cy = captureCursorScreenY - loc[1]
+        if (!cx.isFinite() || !cy.isFinite()) return
+        val r = (s.cursorSize.coerceIn(8f, 64f) * dp / 2f).coerceAtMost(34f * dp)
+        paint.color = s.cursorColor
+        paint.strokeWidth = (2f * dp).coerceAtLeast(1.5f)
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.style = Paint.Style.STROKE
+        when (s.cursorType) {
+            1 -> c.drawCircle(cx, cy, r * 0.72f, paint)
+            2 -> {
+                paint.style = Paint.Style.FILL
+                c.drawCircle(cx, cy, (r * 0.22f).coerceAtLeast(2f * dp), paint)
+            }
+            3 -> {
+                paint.style = Paint.Style.FILL
+                val path = android.graphics.Path().apply {
+                    moveTo(cx - r * 0.55f, cy - r * 0.9f)
+                    lineTo(cx - r * 0.25f, cy + r * 0.85f)
+                    lineTo(cx + r * 0.05f, cy + r * 0.28f)
+                    lineTo(cx + r * 0.55f, cy + r * 0.55f)
+                    lineTo(cx + r * 0.7f, cy + r * 0.28f)
+                    lineTo(cx + r * 0.18f, cy + r * 0.02f)
+                    close()
+                }
+                c.drawPath(path, paint)
+            }
+            else -> {
+                val arm = r * 0.72f
+                c.drawLine(cx - arm, cy, cx + arm, cy, paint)
+                c.drawLine(cx, cy - arm, cx, cy + arm, paint)
+                paint.style = Paint.Style.FILL
+                c.drawCircle(cx, cy, (r * 0.16f).coerceAtLeast(2f * dp), paint)
+            }
+        }
+        paint.style = Paint.Style.FILL
+    }
+
     private fun drawGridLines(c: Canvas, s: AppSettings) {
         val g = s.gridSnap
         if (g <= 0) return
@@ -220,7 +284,7 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         c.drawCircle(cx, cy, r, paint)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2 * dp
-        paint.color = if (editing && sel) Color.YELLOW else Color.argb(90, 255, 255, 255)
+        paint.color = if (editing && sel) Color.rgb(112, 224, 206) else Color.argb(105, 135, 175, 194)
         c.drawCircle(cx, cy, r, paint)
         text(c, label, cx, cy, 14 * dp, Color.argb(140, 255, 255, 255))
         if (editing) drawGrip(c, id, cx, cy - r)
@@ -229,14 +293,14 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
     /** Alça de arrastar: 6 pontinhos. Só ela move o botão. */
     private fun drawGrip(c: Canvas, id: Int, gx: Float, gy: Float) {
         paint.style = Paint.Style.FILL
-        paint.color = if (selected == id) Color.YELLOW else Color.argb(230, 0, 0, 0)
+        paint.color = if (selected == id) Color.rgb(112, 224, 206) else Color.rgb(16, 31, 43)
         c.drawCircle(gx, gy, 13 * dp, paint)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.5f * dp
         paint.color = Color.argb(220, 255, 255, 255)
         c.drawCircle(gx, gy, 13 * dp, paint)
         paint.style = Paint.Style.FILL
-        paint.color = if (selected == id) Color.BLACK else Color.WHITE
+        paint.color = if (selected == id) Color.rgb(7, 28, 32) else Color.rgb(224, 244, 249)
         for (i in 0..1) for (j in 0..2) {
             c.drawCircle(gx + (i - 0.5f) * 5 * dp, gy + (j - 1) * 5 * dp, 1.5f * dp, paint)
         }
@@ -245,18 +309,26 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
 
     private fun chip(c: Canvas, label: String, cx: Float, cy: Float, action: () -> Unit) {
         paint.style = Paint.Style.FILL
-        paint.color = Color.argb(220, 0, 0, 0)
+        paint.color = Color.rgb(14, 29, 41)
         c.drawCircle(cx, cy, 17 * dp, paint)
-        text(c, label, cx, cy, 16 * dp, Color.WHITE)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.4f * dp
+        paint.color = Color.rgb(86, 144, 164)
+        c.drawCircle(cx, cy, 17 * dp, paint)
+        text(c, label, cx, cy, 16 * dp, Color.rgb(220, 244, 247))
         hits.add(RectF(cx - 20 * dp, cy - 20 * dp, cx + 20 * dp, cy + 20 * dp) to action)
     }
 
     private fun pill(c: Canvas, label: String, cx: Float, cy: Float, on: Boolean, action: () -> Unit) {
         val r = RectF(cx - 30 * dp, cy - 15 * dp, cx + 30 * dp, cy + 15 * dp)
         paint.style = Paint.Style.FILL
-        paint.color = if (on) Color.argb(235, 0, 140, 90) else Color.argb(220, 0, 0, 0)
+        paint.color = if (on) Color.rgb(22, 91, 88) else Color.rgb(14, 29, 41)
         c.drawRoundRect(r, 15 * dp, 15 * dp, paint)
-        text(c, label, cx, cy, 13 * dp, Color.WHITE)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.2f * dp
+        paint.color = if (on) Color.rgb(112, 224, 206) else Color.rgb(69, 103, 122)
+        c.drawRoundRect(r, 15 * dp, 15 * dp, paint)
+        text(c, label, cx, cy, 13 * dp, Color.rgb(230, 247, 249))
         hits.add(r to action)
     }
 
@@ -293,8 +365,13 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             val cy = min(110f * dp, h * 0.32f).coerceAtLeast(64f * dp)
             val radius = min(56f * dp, min(w * 0.24f, h * 0.16f)).coerceAtLeast(30f * dp)
             paint.style = Paint.Style.FILL
-            paint.color = Color.argb(204, 0, 0, 0)
+            paint.color = Color.argb(225, 13, 26, 39)
             c.drawCircle(cx, cy, radius, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.5f * dp
+            paint.color = Color.argb(170, 91, 171, 191)
+            c.drawCircle(cx, cy, radius, paint)
+            paint.style = Paint.Style.FILL
             val offset = radius * 0.5f
             text(c, "W", cx, cy - offset, 16 * dp, Color.WHITE)
             text(c, "A", cx - offset, cy, 16 * dp, Color.WHITE)
@@ -305,8 +382,8 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         if (editing) {
             val helpY = (h - 26f * dp).coerceAtLeast(138f * dp)
             text(
-                c, "EDIÇÃO · arraste o marcador/alça · toque em ⚙ para configurar",
-                w / 2f, helpY, 11 * dp, Color.argb(230, 255, 255, 255)
+                c, "EDIT MODE  ·  arraste os controles  ·  toque em ⚙ para configurar",
+                w / 2f, helpY, 11 * dp, Color.rgb(190, 239, 238)
             )
         }
         if (editing && armed) {
@@ -361,8 +438,13 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             val top = startY + index * (h + gap)
             val rect = RectF(x - w, top, x, top + h)
             paint.style = Paint.Style.FILL
-            paint.color = Color.argb(235, 17, 23, 33)
-            c.drawRoundRect(rect, 9f * dp, 9f * dp, paint)
+            paint.color = Color.argb(245, 15, 30, 43)
+            c.drawRoundRect(rect, 10f * dp, 10f * dp, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1f * dp
+            paint.color = Color.rgb(59, 91, 108)
+            c.drawRoundRect(rect, 10f * dp, 10f * dp, paint)
+            paint.style = Paint.Style.FILL
             paint.color = item.second
             c.drawRoundRect(RectF(rect.left, rect.top, rect.left + 4f * dp, rect.bottom), 3f * dp, 3f * dp, paint)
             text(c, item.first, rect.centerX() + 1f * dp, rect.centerY(), 10f * dp, Color.WHITE)
@@ -397,9 +479,14 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         for ((label, act) in items) {
             val r = RectF(x, y, x + bw, y + bh)
             paint.style = Paint.Style.FILL
-            paint.color = Color.argb(225, 30, 30, 30)
-            c.drawRoundRect(r, 10 * dp, 10 * dp, paint)
-            text(c, label, r.centerX(), r.centerY(), 14 * dp, Color.WHITE)
+            paint.color = Color.argb(242, 15, 31, 44)
+            c.drawRoundRect(r, 12 * dp, 12 * dp, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.2f * dp
+            paint.color = Color.rgb(76, 127, 146)
+            c.drawRoundRect(r, 12 * dp, 12 * dp, paint)
+            paint.style = Paint.Style.FILL
+            text(c, label, r.centerX(), r.centerY(), 14 * dp, Color.rgb(226, 245, 248))
             hits.add(r to act)
             x += bw + gap
         }

@@ -37,7 +37,7 @@ data class AppSettings(
     val joyR: Float = 0.10f,
     val lookX: Float = 0.70f,
     val lookY: Float = 0.50f,
-    val lookR: Float = 0.35f,          // área de câmera maior = menos quebras do arrasto
+    val lookR: Float = 0.35f,          // raio visual/interativo da zona Sight no HUD; não é limite de injeção
     // --- HUD ---
     val hudStyle: Int = 0,             // 0 clássico, 1 neon, 2 BlueStacks, 3 minimalista, 4 ícones
     val showHud: Boolean = true,
@@ -55,6 +55,8 @@ data class AppSettings(
     // --- desempenho / sistema ---
     val refreshHz: Int = 0,            // 0 = automático (máximo)
     val perfMode: Int = 0,             // 0 equilibrado, 1 alta performance, 2 economia
+    /** Derived runtime-only scheduling slack; calculated by MappingService and never persisted. */
+    val schedulingSlackMs: Int = 0,
     val haptics: Boolean = true,
     val theme: Int = 0,
     val autoStart: Boolean = false,
@@ -65,7 +67,7 @@ data class AppSettings(
     val hudWindow: Boolean = true,        // diagnóstico: janela do HUD (tela cheia, transparente)
     val safeOverlay: Boolean = true,      // modo compatível: janelas sem aceleração por GPU
     val captureWindow: Boolean = true,    // janela 1x1 focável que captura mouse/teclado
-    val lookMode: Int = Rot.AUTO,         // padrão: toque contínuo com reancoragem; relativo nativo é uma opção explícita
+    val lookMode: Int = Rot.AUTO,         // padrão compatível; NONSTOP e mouse relativo são estratégias explícitas
     val lookIdleMs: Int = 0,              // padrão mantém o contato; 0 = liberar somente ao desativar/pausar
     val relativeMouse: Boolean = false,   // modo nativo relativo explícito; não é o padrão para jogos controlados por toque
     val lookIntervalMs: Int = 4,          // agrupamento do motor; TouchInjector limita a saída de movimento a ~120 Hz
@@ -189,7 +191,7 @@ data class AppSettings(
                 pauseKey = safePauseKey,
                 safeOverlay = o.optBoolean("safeOverlay", true), captureWindow = o.optBoolean("captureWindow", true),
                 useExternalDisplay = o.optBoolean("useExternalDisplay", false), hudWindow = o.optBoolean("hudWindow", true),
-                lookMode = o.optInt("lookModeV2", d.lookMode).coerceIn(0, 3), lookIdleMs = o.optInt("lookIdleMs", d.lookIdleMs).coerceIn(0, 60000),
+                lookMode = o.optInt("lookModeV2", d.lookMode).coerceIn(0, Rot.NONSTOP), lookIdleMs = o.optInt("lookIdleMs", d.lookIdleMs).coerceIn(0, 60000),
                 relativeMouse = o.optBoolean("relativeMouse", false),
                 lookIntervalMs = o.optInt("lookIntervalMs", 4).coerceIn(1, 20),
                 onlyInGame = o.optBoolean("onlyInGame", true),

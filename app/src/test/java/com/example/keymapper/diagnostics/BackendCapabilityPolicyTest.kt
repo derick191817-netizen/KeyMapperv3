@@ -10,8 +10,13 @@ class BackendCapabilityPolicyTest {
         assertEquals(BackendCapabilityLevel.NOT_IMPLEMENTED, result.level)
     }
 
+    @Test fun unqueriedInitializationIsNotReportedAsNotInitialized() {
+        val result = BackendCapabilityPolicy.assess(true, null, null)
+        assertEquals(BackendCapabilityLevel.MODULE_PRESENT_NOT_PROBED, result.level)
+    }
+
     @Test fun modulePresenceDoesNotMeanBackendWasInitialized() {
-        val result = BackendCapabilityPolicy.assess(true, false, true)
+        val result = BackendCapabilityPolicy.assess(true, false, null)
         assertEquals(BackendCapabilityLevel.MODULE_PRESENT_NOT_INITIALIZED, result.level)
     }
 

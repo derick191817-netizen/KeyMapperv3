@@ -22,6 +22,7 @@ import com.example.keymapper.input.VirtualCursorController
 import com.example.keymapper.display.CoordinateTransformer
 import com.example.keymapper.domain.SensitivityEngine
 import com.example.keymapper.domain.InputBindingPolicy
+import com.example.keymapper.domain.PerformancePolicy
 import kotlin.math.hypot
 import kotlin.math.min
 
@@ -50,6 +51,10 @@ class MappingEngine(
         const val LOOK_B = 30   // ids 2..29 são dos botões; 30 alterna com 1 ao trocar de dedo
         const val EDGE_MARGIN = 10f
         const val MAX_PENDING_MOUSE_DELTA = 1_000_000f
+        // O motor não monopoliza a thread de injeção com milhares de UP/DOWN em um único lote.
+        // O restante é preservado e drenado em continuações ordenadas de 1 ms.
+        const val MAX_REANCHORS_PER_BATCH = 64
+        const val LOOK_REMAINDER_DELAY_MS = 1L
         const val MAX_WHEEL_STEPS_PER_EVENT = 16
         const val MAX_INPUT_EVENTS_PER_DRAIN = 256
         // Não reproduzir movimentos antigos após um bloqueio do consumidor; 50 ms também é
@@ -87,6 +92,11 @@ class MappingEngine(
     private var joyActive = false
     private var lookActive = false
     private var lookId = LOOK_A
+    // A origem e o raio são congelados ao iniciar o contato. Alterar a configuração Aim enquanto
+    // o mouse está em movimento só passa a valer no próximo gesto, sem trocar o referencial ativo.
+    private var activeLookBoundaryRadiusPx = 0f
+    private var activeLookAnchorX = 0f
+    private var activeLookAnchorY = 0f
     // Canvas virtual independente da tela física. Estes valores NUNCA são usados como
     // coordenadas absolutas de touchscreen: o Android/jogo pode limitar coordenadas fora da
     // superfície. A injeção contínua usa deltas relativos via TouchInjector.
@@ -106,6 +116,10 @@ class MappingEngine(
     private val lookLock = Any()
     private var pendX = 0f
     private var pendY = 0f
+    // Excedente pós-sensibilidade de um gesto que exigiu mais de um lote de reancoragem.
+    // É drenado antes de movimento novo para preservar rigorosamente a ordem da câmera.
+    private var pendingLookRemainderX = 0f
+    private var pendingLookRemainderY = 0f
     private var flushScheduled = false
     private val scrollAccumulator = MouseScrollAccumulator(
         maxStepsPerAxisPerEvent = MAX_WHEEL_STEPS_PER_EVENT
@@ -264,9 +278,9 @@ class MappingEngine(
             if (!paused || event.type == InputEventQueue.TYPE_RELEASE) {
                 when (event.type) {
                     InputEventQueue.TYPE_MOUSE -> {
-                        if (!touch.broken) processMouseSample(
-                            event.x, event.y, event.eventTimeNanos, event.deviceId
-                        )
+                        // A saída touchscreen uinput pode continuar funcional mesmo quando
+                        // INJECT_EVENTS/InputManager está indisponível. Cada backend decide no envio.
+                        processMouseSample(event.x, event.y, event.eventTimeNanos, event.deviceId)
                     }
                     InputEventQueue.TYPE_KEY -> handleKey(event.code, event.down)
                     InputEventQueue.TYPE_SCROLL -> processMouseScroll(event.x, event.y, event.deviceId)
@@ -378,8 +392,13 @@ class MappingEngine(
             }
         }
         if (schedule) {
-            // lookIntervalMs agrupa somente a saída já transformada; não altera aceleração.
-            val interval = cfg().lookIntervalMs.coerceIn(1, 20).toLong()
+            // lookIntervalMs agrupa somente a saída já transformada; a folga adicional vem
+            // do modo de desempenho e é calculada para a RAM real do dispositivo.
+            val settings = cfg()
+            val interval = PerformancePolicy.applySlack(
+                settings.lookIntervalMs,
+                settings.schedulingSlackMs
+            ).toLong()
             val wait = (lastFlush + interval - SystemClock.uptimeMillis()).coerceAtLeast(0L)
             touch.handler.postDelayed(flushLook, wait)
         }
@@ -403,15 +422,53 @@ class MappingEngine(
         var dx = 0f
         var dy = 0f
         synchronized(lookLock) {
-            dx = pendX
-            dy = pendY
-            pendX = 0f
-            pendY = 0f
             flushScheduled = false
+            if (pendingLookRemainderX != 0f || pendingLookRemainderY != 0f) {
+                // O excedente sempre precede amostras mais recentes que ficaram acumuladas em pendX/Y.
+                dx = pendingLookRemainderX
+                dy = pendingLookRemainderY
+                pendingLookRemainderX = 0f
+                pendingLookRemainderY = 0f
+            } else {
+                dx = pendX
+                dy = pendY
+                pendX = 0f
+                pendY = 0f
+            }
         }
         lastFlush = SystemClock.uptimeMillis()
-        if (paused || touch.broken || (dx == 0f && dy == 0f)) return // Shizuku caiu: não gasta CPU à toa
-        if (applyLookDelta(dx, dy)) InputDiagnostics.recordMouseForwarded(dx, dy)
+        if (!paused && (dx != 0f || dy != 0f)) {
+            if (applyLookDelta(dx, dy)) InputDiagnostics.recordMouseForwarded(dx, dy)
+        }
+        scheduleLookFlushIfNeeded()
+    }
+
+    /** Agenda continuação sem descartar o excedente nem ultrapassar a ordem dos eventos recebidos. */
+    private fun scheduleLookFlushIfNeeded() {
+        if (paused) return
+        var schedule = false
+        synchronized(lookLock) {
+            val hasRemainder = pendingLookRemainderX != 0f || pendingLookRemainderY != 0f
+            // Com deadzone=0, um buffer vazio não pode agendar flushes infinitos.
+            val hasPendingDelta = pendX != 0f || pendY != 0f
+            val pendingReady = hasPendingDelta && hypot(pendX, pendY) >= currentLookDeadzone()
+            if (!flushScheduled && (hasRemainder || pendingReady)) {
+                flushScheduled = true
+                schedule = true
+            }
+        }
+        if (!schedule) return
+        val wait = if (hasRemainder) {
+            LOOK_REMAINDER_DELAY_MS
+        } else {
+            val settings = cfg()
+            val interval = PerformancePolicy.applySlack(
+                settings.lookIntervalMs,
+                settings.schedulingSlackMs
+            ).toLong()
+            (lastFlush + interval - SystemClock.uptimeMillis()).coerceAtLeast(0L)
+        }
+        touch.handler.postDelayed(flushLook, wait)
     }
 
     /** Solta tudo (troca de monitor, mouse removido, pausa, modo edição, queda do Shizuku). */
@@ -437,6 +494,8 @@ class MappingEngine(
         synchronized(lookLock) {
             pendX = 0f
             pendY = 0f
+            pendingLookRemainderX = 0f
+            pendingLookRemainderY = 0f
             flushScheduled = false
         }
         keys.clear()
@@ -452,6 +511,9 @@ class MappingEngine(
         sampleClock.reset()
         virtualCursor.reset()
         aimId = -1
+        activeLookBoundaryRadiusPx = 0f
+        activeLookAnchorX = 0f
+        activeLookAnchorY = 0f
         touch.releaseAll()
     }
 
@@ -700,6 +762,7 @@ class MappingEngine(
         InputDiagnostics.setOutputMode(
             when (effectiveLookMode) {
                 Rot.INFINITE -> "SOURCE_MOUSE_RELATIVE (compatibilidade do destino não confirmada)"
+                Rot.NONSTOP -> "Touchscreen Nonstop (POINTER_DOWN/UP sobreposto)"
                 Rot.OFF -> "Touchscreen absoluto limitado"
                 else -> "Touchscreen com reancoragem UP/DOWN"
             }
@@ -743,13 +806,22 @@ class MappingEngine(
             (a.left + (s.bsLookPositionX.coerceIn(0, 1000) / 1000f) * a.width()).coerceIn(anchorMinX, anchorMaxX)
         }
         val cy = (a.top + fy * a.height()).coerceIn(anchorMinY, anchorMaxY)
+        val requestedRadius = if (lookActive) activeLookBoundaryRadiusPx else
+            LookBoundaryPolicy.resolveRadiusPx(
+                radiusPercent = ab?.aimBoundaryRadiusPct ?: 0f,
+                width = a.width(), height = a.height(),
+                anchorX = cx, anchorY = cy,
+                minX = minX, maxX = maxX, minY = minY, maxY = maxY
+            )
 
-        val accepted = when (effectiveLookMode) {
-            Rot.OFF -> lookClamped(s, cx, cy, moveX, moveY, minX, maxX, minY, maxY)
-            else -> lookCenter(s, cx, cy, moveX, moveY, minX, maxX, minY, maxY)
+        return when (effectiveLookMode) {
+            Rot.OFF -> lookClamped(s, ab, cx, cy, moveX, moveY, minX, maxX, minY, maxY)
+            else -> lookCenter(
+                s, ab, cx, cy, moveX, moveY, minX, maxX, minY, maxY,
+                nonstop = effectiveLookMode == Rot.NONSTOP,
+                boundaryRadiusPx = requestedRadius
+            )
         }
-        if (accepted) virtualCursor.advance(moveX, moveY)
-        return accepted
     }
 
     /** Mantém referência lógica ilimitada e encaminha deltas relativos ao backend nativo explícito. */
@@ -759,15 +831,21 @@ class MappingEngine(
         return touch.injectVirtualMove(dx, dy)
     }
 
-    private fun beginLook(cx: Float, cy: Float) {
+    private fun beginLook(cx: Float, cy: Float, boundaryRadiusPx: Float = 0f): Boolean {
         if (!lookActive) {
+            activeLookBoundaryRadiusPx = boundaryRadiusPx.coerceAtLeast(0f)
+            activeLookAnchorX = cx
+            activeLookAnchorY = cy
             lx = cx
             ly = cy
             // A referência lógica não é redefinida pela coordenada absoluta do toque; o contato
             // touchscreen é apenas a origem física necessária ao fallback de arrasto.
             touch.down(lookId, lx, ly)
-            lookActive = true
+            // down() pode recusar o contato por falta de backend, limite de ponteiros ou falha
+            // de injeção. Não marque a câmera como ativa se o contato não existe no injetor.
+            lookActive = touch.isDown(lookId)
         }
+        return lookActive && touch.isDown(lookId)
     }
 
     private fun armRelease(delayMs: Long) {
@@ -775,10 +853,9 @@ class MappingEngine(
         if (delayMs > 0L) touch.handler.postDelayed(releaseLook, delayMs)
     }
 
-    private fun idleMs(s: AppSettings): Long {
-        // 0 significa manter o contato até a mira ser liberada/pausada. TouchInjector.up()
-        // força a entrega do último MOVE pendente antes de liberar o contato.
-        return s.lookIdleMs.coerceIn(0, 60_000).toLong()
+    private fun idleMs(s: AppSettings, button: HudButton? = null): Long {
+        // 0 mantém o contato; -1 no botão herda o global. O UP sempre força a entrega do último MOVE.
+        return LookBoundaryPolicy.resolveAutoReleaseMs(button?.aimAutoReleaseMs ?: -1, s.lookIdleMs)
     }
 
     /**
@@ -788,59 +865,131 @@ class MappingEngine(
      * não é mouse relativo nativo e pode produzir uma pequena interrupção perceptível no jogo.
      */
     private fun lookCenter(
-        s: AppSettings, cx: Float, cy: Float, ox: Float, oy: Float,
-        minX: Float, maxX: Float, minY: Float, maxY: Float
+        s: AppSettings, ab: HudButton?, cx: Float, cy: Float, ox: Float, oy: Float,
+        minX: Float, maxX: Float, minY: Float, maxY: Float,
+        nonstop: Boolean,
+        boundaryRadiusPx: Float
     ): Boolean {
-        val startX = if (lookActive) lx else cx
-        val startY = if (lookActive) ly else cy
+        val gestureAnchorX = if (lookActive) activeLookAnchorX else cx
+        val gestureAnchorY = if (lookActive) activeLookAnchorY else cy
+        val startX = if (lookActive) lx else gestureAnchorX
+        val startY = if (lookActive) ly else gestureAnchorY
         val plan = LookReanchorPlanner.plan(
             startX = startX,
             startY = startY,
             deltaX = ox,
             deltaY = oy,
-            anchorX = cx,
-            anchorY = cy,
-            bounds = LookReanchorPlanner.Bounds(minX, maxX, minY, maxY)
+            anchorX = gestureAnchorX,
+            anchorY = gestureAnchorY,
+            bounds = LookReanchorPlanner.Bounds(minX, maxX, minY, maxY),
+            maxReanchors = MAX_REANCHORS_PER_BATCH,
+            boundaryRadius = boundaryRadiusPx
         ) ?: return false
-        beginLook(cx, cy)
+        if (!beginLook(gestureAnchorX, gestureAnchorY, boundaryRadiusPx)) return false
+        // Um timer de inatividade antigo não pode liberar o contato no meio da continuação.
+        touch.handler.removeCallbacks(releaseLook)
+        var pathX = 0f
+        var pathY = 0f
+        var pathStartX = startX
+        var pathStartY = startY
         for (point in plan.reanchors) {
             val next = if (lookId == LOOK_A) LOOK_B else LOOK_A
-            touch.swap(lookId, next, point.edgeX, point.edgeY, cx, cy)
+            pathX += point.edgeX - pathStartX
+            pathY += point.edgeY - pathStartY
+            val switched = touch.swap(
+                oldId = lookId,
+                newId = next,
+                ex = point.edgeX,
+                ey = point.edgeY,
+                nx = gestureAnchorX,
+                ny = gestureAnchorY,
+                nonstop = nonstop
+            )
+            if (!switched) {
+                // O deslocamento até a última borda foi tentado; não reproduza o restante em
+                // duplicidade. Solte ambos os IDs possíveis e descarte trabalho antigo.
+                virtualCursor.advance(pathX, pathY)
+                abortLookHandoff(lookId, next)
+                return false
+            }
             lookId = next
-        }
-        if (plan.capped) {
-            Log.w("KeyMapperLook", "Delta exigiu mais reancoragens que o limite de segurança; excedente foi limitado")
+            pathStartX = gestureAnchorX
+            pathStartY = gestureAnchorY
         }
         lx = plan.finalX
         ly = plan.finalY
-        touch.move(lookId, lx, ly)
-        armRelease(idleMs(s))
+        // Em uma continuação limitada, o último handover já criou um contato no anchor.
+        if (!plan.capped && lookActive && touch.isDown(lookId)) touch.move(lookId, lx, ly)
+
+        // O planejador garante que delta - remainder é exatamente o caminho já representado.
+        // Não derive o movimento de coordenadas absolutas nem conte novamente os trechos entre
+        // handovers: a referência lógica só avança pelo delta efetivamente consumido neste lote.
+        virtualCursor.advance(
+            ox - plan.remainingDeltaX,
+            oy - plan.remainingDeltaY
+        )
+        if (plan.capped && plan.hasRemaining) {
+            pendingLookRemainderX = boundedDeltaSum(pendingLookRemainderX, plan.remainingDeltaX)
+            pendingLookRemainderY = boundedDeltaSum(pendingLookRemainderY, plan.remainingDeltaY)
+        } else {
+            armRelease(idleMs(s, ab))
+        }
         return true
+    }
+
+    /** Cancela somente a cadeia de câmera se um handover de contato falhar. */
+    private fun abortLookHandoff(oldId: Int, newId: Int) {
+        touch.handler.removeCallbacks(releaseLook)
+        if (touch.isDown(newId)) touch.up(newId)
+        if (touch.isDown(oldId)) touch.up(oldId)
+        lookActive = false
+        lookId = LOOK_A
+        activeLookBoundaryRadiusPx = 0f
+        activeLookAnchorX = 0f
+        activeLookAnchorY = 0f
+        lx = 0f
+        ly = 0f
+        synchronized(lookLock) {
+            pendX = 0f
+            pendY = 0f
+            pendingLookRemainderX = 0f
+            pendingLookRemainderY = 0f
+            flushScheduled = false
+        }
+        touch.handler.removeCallbacks(flushLook)
+        sampleClock.reset()
+        sens.reset()
     }
 
     /** Modo limitado: a mira para na margem da área e não reancora o contato. */
     private fun lookClamped(
-        s: AppSettings, cx: Float, cy: Float, ox: Float, oy: Float,
+        s: AppSettings, ab: HudButton?, cx: Float, cy: Float, ox: Float, oy: Float,
         minX: Float, maxX: Float, minY: Float, maxY: Float
     ): Boolean {
-        beginLook(cx, cy)
+        if (!beginLook(cx, cy)) return false
+        val oldX = lx
+        val oldY = ly
         lx = (lx + ox).coerceIn(minX, maxX)
         ly = (ly + oy).coerceIn(minY, maxY)
         touch.move(lookId, lx, ly)
-        armRelease(idleMs(s))
+        virtualCursor.advance(lx - oldX, ly - oldY)
+        armRelease(idleMs(s, ab))
         return true
     }
 
     private fun endLook() {
-        if (lookActive) {
-            touch.up(lookId)
-            lookActive = false
-            lookId = LOOK_A
-        }
+        if (lookActive) touch.up(lookId)
+        lookActive = false
+        lookId = LOOK_A
+        activeLookBoundaryRadiusPx = 0f
+        activeLookAnchorX = 0f
+        activeLookAnchorY = 0f
         touch.handler.removeCallbacks(flushLook)
         synchronized(lookLock) {
             pendX = 0f
             pendY = 0f
+            pendingLookRemainderX = 0f
+            pendingLookRemainderY = 0f
             flushScheduled = false
         }
         sampleClock.reset()

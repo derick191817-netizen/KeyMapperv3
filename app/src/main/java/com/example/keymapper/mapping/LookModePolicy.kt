@@ -9,8 +9,10 @@ internal object LookModePolicy {
         // OFF sempre tem precedência: uma opção de backend não pode reativar a câmera desabilitada.
         if (selected == Rot.OFF) return Rot.OFF
         if (forceNativeRelative || selected == Rot.INFINITE) return Rot.INFINITE
-        // AUTO é deliberadamente conservador: funciona com jogos Android controlados por toque.
+        if (selected == Rot.NONSTOP) return Rot.NONSTOP
+        // AUTO é deliberadamente conservador: troca UP/DOWN somente quando o contato chega à margem.
+        // NONSTOP é uma estratégia distinta: sobrepõe os contatos durante a troca e depende do jogo.
         if (selected == Rot.AUTO) return Rot.CENTER
-        return selected.coerceIn(Rot.CENTER, Rot.OFF)
+        return if (selected == Rot.CENTER) Rot.CENTER else Rot.OFF
     }
 }

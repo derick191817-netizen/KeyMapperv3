@@ -86,6 +86,59 @@ class PhysicalInputStateTest {
         assertTrue(state.releaseKey(20, 29))
         assertTrue(state.canDispatchTransientKey(10, 29))
     }
+
+    @Test fun evdevButtonTransitionsAreAggregatedAcrossMice() {
+        val state = PhysicalInputState()
+        val primary = 1
+        assertTrue(state.updateButtonCode(-101, 272, primary, true))
+        assertFalse(state.updateButtonCode(-102, 272, primary, true))
+        assertFalse(state.updateButtonCode(-101, 272, primary, false))
+        assertTrue(state.updateButtonCode(-102, 272, primary, false))
+        assertFalse(state.updateButtonCode(-102, 272, primary, false))
+    }
+
+    @Test fun removingOneEvdevDeviceKeepsSharedKeyAndButtonHeldByAnother() {
+        val state = PhysicalInputState()
+        assertTrue(state.pressKey(-101, 29))
+        assertFalse(state.pressKey(-102, 29))
+        assertTrue(state.updateButtonCode(-101, 272, 1, true))
+        assertFalse(state.updateButtonCode(-102, 272, 1, true))
+
+        val removed = state.clearDevice(-101)
+        assertTrue(removed.keyCodes.isEmpty())
+        assertEquals(0, removed.buttonMask)
+        assertTrue(state.isKeyHeldAnywhere(29))
+        assertTrue(state.releaseKey(-102, 29))
+        assertTrue(state.updateButtonCode(-102, 272, 1, false))
+    }
+
+    @Test fun twoLinuxButtonCodesMappedToOneLogicalButtonDoNotReleaseEachOther() {
+        val state = PhysicalInputState()
+        val backButton = 8
+        assertTrue(state.updateButtonCode(-101, 275, backButton, true)) // BTN_SIDE
+        assertFalse(state.updateButtonCode(-101, 278, backButton, true)) // BTN_BACK alias
+        assertFalse(state.updateButtonCode(-101, 275, backButton, false))
+        assertTrue(state.updateButtonCode(-101, 278, backButton, false))
+    }
+
+    @Test fun removingLastEvdevDeviceReturnsOnlyItsGlobalReleases() {
+        val state = PhysicalInputState()
+        assertTrue(state.pressKey(-101, 29))
+        assertTrue(state.updateButtonCode(-101, 274, 4, true))
+        val removed = state.clearDevice(-101)
+        assertEquals(listOf(29), removed.keyCodes.toList())
+        assertEquals(4, removed.buttonMask)
+        assertFalse(state.isKeyHeldAnywhere(29))
+    }
+
+    @Test fun updateSingleButtonRejectsInvalidAndMultiBitMasks() {
+        val state = PhysicalInputState()
+        assertFalse(state.updateButtonCode(-101, 272, 0, true))
+        assertFalse(state.updateButtonCode(-101, 272, 3, true))
+        assertFalse(state.updateButtonCode(-101, 272, 0x20, true))
+        assertEquals(0, state.clear().buttonMask)
+    }
+
     @Test fun randomizedMultiDeviceStateMatchesReferenceForTenThousandTransitions() {
         val actual = PhysicalInputState()
         val referenceKeys = LinkedHashMap<Int, MutableSet<Int>>()

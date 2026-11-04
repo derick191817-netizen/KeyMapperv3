@@ -7,14 +7,20 @@ plugins {
 android {
     namespace = "com.example.keymapper"
     compileSdk = 34
+    ndkVersion = "26.3.11579264"
 
     defaultConfig {
         applicationId = "com.example.keymapper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 30
-        versionName = "0.14.14"
+        versionCode = 62
+        versionName = "0.14.46"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17")
+            }
+        }
     }
 
     buildTypes {
@@ -43,9 +49,17 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        aidl = true
     }
 
-    // O plugin Compose para Kotlin 2.0.x administra a versão do compilador.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    // O plugin Compose para Kotlin 2.4.x administra a versão do compilador.
     // Não definir kotlinCompilerExtensionVersion aqui evita conflito de versões.
     testOptions {
         unitTests {
@@ -69,12 +83,16 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // Shizuku: API de chamada e ContentProvider de integração.
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
-    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
+
+    // Cliente ADB TLS independente do Shizuku: pareamento por código, conexão e descoberta mDNS.
+    implementation("com.flyfishxu:kadb:2.1.5")
+    implementation("com.flyfishxu:kadb-mdns:2.1.5")
 
     testImplementation("junit:junit:4.13.2")
 }

@@ -19,7 +19,7 @@ data class ScreenInfo(
     val refreshRate: Float,
     val external: Boolean
 ) {
-    val ratio: Float get() = if (height > 0) width.toFloat() / height else 16f / 9f
+    val ratio: Float get() = if (width > 0 && height > 0) width.toFloat() / height else 16f / 9f
 }
 
 /**
@@ -56,17 +56,38 @@ object DisplayUtils {
             h = p.y
         }
         val dm = windowCtx.resources.displayMetrics
-        val dpi = if (dm.densityDpi > 0) dm.densityDpi else 160
-        val density = if (dm.density > 0f) dm.density else dpi / 160f
-        return ScreenInfo(display.displayId, w, h, dpi, density, display.refreshRate, display.displayId != Display.DEFAULT_DISPLAY)
+        val dpi = dm.densityDpi.takeIf { it in 80..1000 } ?: 160
+        val density = dm.density.takeIf { it.isFinite() && it > 0f } ?: dpi / 160f
+        val refresh = runCatching { display.refreshRate }
+            .getOrDefault(60f).takeIf { it.isFinite() && it > 0f } ?: 60f
+        return ScreenInfo(display.displayId, w, h, dpi, density, refresh, display.displayId != Display.DEFAULT_DISPLAY)
     }
 
     @Suppress("DEPRECATION")
     fun fallback(ctx: Context, d: Display): ScreenInfo {
         val p = Point()
-        d.getRealSize(p)
-        val dm = ctx.resources.displayMetrics
-        return ScreenInfo(d.displayId, p.x, p.y, dm.densityDpi, dm.density, d.refreshRate, d.displayId != Display.DEFAULT_DISPLAY)
+        runCatching { d.getRealSize(p) }
+        val mode = runCatching { d.mode }.getOrNull()
+        // Use metrics from the actual display context; the application context may describe
+        // the phone panel while this code is reporting an external DeX monitor.
+        val displayContext = runCatching { ctx.createDisplayContext(d) }.getOrDefault(ctx)
+        val metrics = runCatching { displayContext.resources.displayMetrics }.getOrNull()
+        val configurationDpi = runCatching { displayContext.resources.configuration.densityDpi }.getOrDefault(0)
+        // Never fabricate a screen size when both public display queries fail. A zero-sized
+        // result makes MappingService suspend the selected output instead of mapping to a fake panel.
+        val width = p.x.takeIf { it > 0 } ?: mode?.physicalWidth?.takeIf { it > 0 } ?: 0
+        val height = p.y.takeIf { it > 0 } ?: mode?.physicalHeight?.takeIf { it > 0 } ?: 0
+        val dpi = metrics?.densityDpi?.takeIf { it in 80..1000 }
+            ?: configurationDpi.takeIf { it in 80..1000 }
+            ?: DEFAULT.densityDpi
+        val density = metrics?.density?.takeIf { it.isFinite() && it > 0f }
+            ?: dpi / 160f
+        val refreshRate = runCatching { d.refreshRate }.getOrDefault(DEFAULT.refreshRate)
+            .takeIf { it.isFinite() && it > 0f } ?: DEFAULT.refreshRate
+        return ScreenInfo(
+            d.displayId, width, height, dpi, density, refreshRate,
+            d.displayId != Display.DEFAULT_DISPLAY
+        )
     }
 
     /** Retângulo (em pixels do monitor) onde o jogo realmente desenha. */
