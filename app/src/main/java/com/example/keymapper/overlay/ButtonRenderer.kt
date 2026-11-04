@@ -58,7 +58,9 @@ object ButtonRenderer {
     private fun neonColor(b: HudButton): Int = when {
         b.kind == Kind.AIM -> Color.rgb(0, 255, 140)
         b.kind == Kind.FIRE -> Color.rgb(255, 70, 70)
-        b.macro.isNotEmpty() -> Color.rgb(255, 140, 0)
+        b.kind == Kind.SWIPE -> Color.rgb(177, 145, 255)
+        b.kind == Kind.MACRO -> Color.rgb(220, 151, 69)
+        b.isCombo || b.macro.isNotEmpty() -> Color.rgb(255, 140, 0)
         b.mode == Mode.TOGGLE -> Color.rgb(255, 0, 200)
         b.mode == Mode.TAP -> Color.rgb(255, 230, 0)
         else -> Color.rgb(0, 220, 255)

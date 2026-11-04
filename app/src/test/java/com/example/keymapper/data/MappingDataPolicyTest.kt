@@ -44,6 +44,34 @@ class MappingDataPolicyTest {
     }
 
     @Test
+    fun emptyComboKeepsItsIndependentIdentityAfterNormalization() {
+        val combo = HudButton(id = 9, key = 35, name = "Combo", isCombo = true)
+        val normalized = MappingDataPolicy.normalizeButtons(listOf(combo)).single()
+        assertTrue(normalized.isCombo)
+        assertTrue(normalized.macro.isEmpty())
+    }
+
+    @Test
+    fun comboCannotReferenceMacroAndMacroSequenceKeepsOnlyValidTypedTargets() {
+        val tap = HudButton(id = 1, key = 29, x = .2f, y = .3f, mode = Mode.TAP)
+        val macro = HudButton(
+            id = 2, key = 30, x = .3f, y = .4f, kind = Kind.MACRO,
+            sequence = listOf(
+                MacroStep(MacroAction.WAIT, -1, 300),
+                MacroStep(MacroAction.TAP, 1, 25),
+                MacroStep(MacroAction.TAP, 99, 25)
+            )
+        )
+        val combo = HudButton(id = 3, key = 31, x = .4f, y = .5f, macro = listOf(2), isCombo = true)
+        val result = MappingDataPolicy.normalizeButtons(listOf(tap, macro, combo))
+        assertEquals(emptyList<Int>(), result[2].macro)
+        assertEquals(
+            listOf(MacroStep(MacroAction.WAIT, -1, 300), MacroStep(MacroAction.TAP, 1, 25)),
+            result[1].sequence
+        )
+    }
+
+    @Test
     fun controlCountIsBounded() {
         val result = MappingDataPolicy.normalizeButtons((0..140).map {
             HudButton(id = it, key = 0, x = .5f, y = .5f)

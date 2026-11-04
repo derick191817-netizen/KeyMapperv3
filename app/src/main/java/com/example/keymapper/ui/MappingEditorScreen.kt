@@ -35,8 +35,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Launch
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
@@ -74,6 +72,7 @@ import com.example.keymapper.data.Mode
 import com.example.keymapper.data.displayName
 import com.example.keymapper.data.keyLabel
 import com.example.keymapper.display.DisplayHelper
+import com.example.keymapper.domain.MappingEditorPolicy
 import com.example.keymapper.injection.Activation
 import com.example.keymapper.injection.ActivationState
 import com.example.keymapper.presentation.SettingsViewModel
@@ -85,13 +84,13 @@ import kotlin.math.roundToInt
 
 /**
  * Workspace de configuração em estilo desktop/emulador.
- * A prévia é baseada nas coordenadas persistidas, enquanto o arraste é feito no HUD real.
+ * A prévia representa todos os tipos e áreas do perfil; os parâmetros completos são abertos no HUD real.
  */
 @Composable
 fun MappingEditorScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: (Int) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val settings by viewModel.settings.collectAsState()
@@ -104,8 +103,15 @@ fun MappingEditorScreen(
     var serviceRunning by remember { mutableStateOf(MappingService.running) }
     var shizukuReady by remember { mutableStateOf(false) }
     var activeProfilePackage by remember { mutableStateOf(MappingService.activeProfilePackageSnapshot) }
-    var selectedControlId by remember(selectedPackage, selectedButtons) {
-        mutableStateOf(selectedButtons.firstOrNull { it.kind == Kind.STANDARD }?.id)
+    var selectedControlId by remember(selectedPackage) {
+        mutableStateOf(selectedButtons.firstOrNull()?.id)
+    }
+    // Reposicionar um controle muda a lista, mas não deve perder a seleção atual.
+    // Só escolhe outro item quando o controle selecionado deixa de existir no perfil.
+    LaunchedEffect(selectedPackage, selectedButtons.map { it.id }) {
+        if (selectedButtons.none { it.id == selectedControlId }) {
+            selectedControlId = selectedButtons.firstOrNull()?.id
+        }
     }
 
     // Estado do serviço e do perfil muda sem necessariamente recriar esta tela (ex.: volta do app).
@@ -122,8 +128,9 @@ fun MappingEditorScreen(
     }
 
     val activeProfileMatches = !settings.onlyInGame || activeProfilePackage == selectedPackage
-    val canEditProfile = serviceRunning && overlayGranted && activeProfileMatches
-    val standardControls = selectedButtons.filter { it.kind == Kind.STANDARD }
+    val canEditProfile = serviceRunning && overlayGranted && shizukuReady && activeProfileMatches
+    // A prévia deve representar exatamente a lista persistida, não apenas os controles padrão.
+    val profileControls = selectedButtons
     val selectedControl = selectedButtons.firstOrNull { it.id == selectedControlId }
 
     fun openOverlayPermission() {
@@ -165,12 +172,18 @@ fun MappingEditorScreen(
         }
     }
 
-    fun addStandardControl() {
+    fun addControl(kind: Int, mode: Int, name: String) {
         if (!canEditProfile) return
         runCatching {
-            context.startService(Intent(context, MappingService::class.java).setAction(MappingService.ACTION_ADD_STANDARD_CONTROL))
+            context.startService(
+                Intent(context, MappingService::class.java)
+                    .setAction(MappingService.ACTION_ADD_CONTROL)
+                    .putExtra(MappingService.EXTRA_CONTROL_KIND, kind)
+                    .putExtra(MappingService.EXTRA_CONTROL_MODE, mode)
+                    .putExtra(MappingService.EXTRA_CONTROL_NAME, name)
+            )
         }.onFailure {
-            Toast.makeText(context, "Não foi possível adicionar o controle.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Não foi possível criar este controle.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -187,7 +200,7 @@ fun MappingEditorScreen(
         }
     }
 
-    fun moveStandardControl(id: Int, x: Float, y: Float) {
+    fun moveControl(id: Int, x: Float, y: Float) {
         if (!canEditProfile || !x.isFinite() || !y.isFinite()) return
         val safeX = x.coerceIn(0.02f, 0.98f)
         val safeY = y.coerceIn(0.02f, 0.98f)
@@ -196,7 +209,7 @@ fun MappingEditorScreen(
                 current.profiles[selectedPackage]?.buttons ?: current.buttons
             } else current.buttons
             val updatedButtons = sourceButtons.map { button ->
-                if (button.id == id && button.kind == Kind.STANDARD) button.copy(x = safeX, y = safeY)
+                if (button.id == id) button.copy(x = safeX, y = safeY)
                 else button
             }
             if (current.onlyInGame && selectedPackage.isNotBlank()) {
@@ -211,7 +224,7 @@ fun MappingEditorScreen(
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         WorkspaceHeader(
             packageName = selectedPackage,
-            controlCount = standardControls.size,
+            controlCount = profileControls.size,
             serviceRunning = serviceRunning,
             profileReady = activeProfileMatches,
             externalDisplaySelected = settings.useExternalDisplay,
@@ -245,7 +258,7 @@ fun MappingEditorScreen(
                             canEdit = canEditProfile,
                             onLaunch = ::openTarget,
                             onBeginEdit = ::beginLiveEdit,
-                            onAddControl = ::addStandardControl,
+                            onAddControl = { kind, mode, name -> addControl(kind, mode, name) },
                             onOpenSettings = onOpenSettings
                         )
                         WorkflowPanel()
@@ -255,11 +268,14 @@ fun MappingEditorScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         LayoutPreviewPanel(
-                            controls = standardControls,
+                            controls = profileControls,
                             selectedId = selectedControlId,
                             gridSnap = settings.gridSnap,
+                            joystickX = settings.joyX, joystickY = settings.joyY, joystickRadius = settings.joyR,
+                            lookX = settings.lookX, lookY = settings.lookY, lookRadius = settings.lookR,
+                            canMove = canEditProfile,
                             onSelect = { selectedControlId = it },
-                            onMove = ::moveStandardControl
+                            onMove = ::moveControl
                         )
                         ControlTablePanel(
                             controls = selectedButtons,
@@ -274,7 +290,7 @@ fun MappingEditorScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         ControlPropertiesPanel(selectedControl, canEditProfile) {
-                            selectedControl?.takeIf { it.kind == Kind.STANDARD }?.let { configureControl(it.id) }
+                            selectedControl?.let { configureControl(it.id) }
                         }
                         EmulatorSettingsPanel(onOpenSettings)
                     }
@@ -289,11 +305,14 @@ fun MappingEditorScreen(
                         selectedPackage, ::openOverlayPermission
                     )
                     LayoutPreviewPanel(
-                        controls = standardControls,
+                        controls = profileControls,
                         selectedId = selectedControlId,
                         gridSnap = settings.gridSnap,
+                        joystickX = settings.joyX, joystickY = settings.joyY, joystickRadius = settings.joyR,
+                        lookX = settings.lookX, lookY = settings.lookY, lookRadius = settings.lookR,
+                        canMove = canEditProfile,
                         onSelect = { selectedControlId = it },
-                        onMove = ::moveStandardControl
+                        onMove = ::moveControl
                     )
                     ControlTablePanel(
                         controls = selectedButtons,
@@ -303,14 +322,14 @@ fun MappingEditorScreen(
                         onConfigure = ::configureControl
                     )
                     ControlPropertiesPanel(selectedControl, canEditProfile) {
-                        selectedControl?.takeIf { it.kind == Kind.STANDARD }?.let { configureControl(it.id) }
+                        selectedControl?.let { configureControl(it.id) }
                     }
                     WorkspaceActionsPanel(
                         canLaunch = serviceRunning && overlayGranted && selectedPackage.isNotBlank(),
                         canEdit = canEditProfile,
                         onLaunch = ::openTarget,
                         onBeginEdit = ::beginLiveEdit,
-                        onAddControl = ::addStandardControl,
+                        onAddControl = { kind, mode, name -> addControl(kind, mode, name) },
                         onOpenSettings = onOpenSettings
                     )
                     EmulatorSettingsPanel(onOpenSettings)
@@ -378,7 +397,7 @@ private fun WorkspaceHeader(
                         Text("KEYMAPPER STUDIO  /  WORKSPACE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         Text("Editor de controles", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            "${packageName.ifBlank { "Perfil global" }}  ·  $controlCount controles de tecla",
+                            "${packageName.ifBlank { "Perfil global" }}  ·  $controlCount controles mapeados",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -463,10 +482,17 @@ private fun LayoutPreviewPanel(
     controls: List<HudButton>,
     selectedId: Int?,
     gridSnap: Int,
+    canMove: Boolean,
+    joystickX: Float, joystickY: Float, joystickRadius: Float,
+    lookX: Float, lookY: Float, lookRadius: Float,
     onSelect: (Int) -> Unit,
     onMove: (Int, Float, Float) -> Unit
 ) {
-    WorkspacePanel("Layout do perfil", "Prévia 16:9 · selecione e arraste os controles") {
+    WorkspacePanel(
+        "Layout do perfil",
+        if (canMove) "Prévia 16:9 · selecione e arraste os controles"
+        else "Prévia 16:9 · arraste disponível com serviço, Shizuku e perfil ativos"
+    ) {
         BoxWithConstraints(
             Modifier.fillMaxWidth()
                 .aspectRatio(16f / 9f)
@@ -498,16 +524,32 @@ private fun LayoutPreviewPanel(
                 }
                 drawLine(centerLine, Offset(size.width / 2f, 0f), Offset(size.width / 2f, size.height), 1.2f)
                 drawLine(centerLine, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), 1.2f)
+
+                // As áreas de WASD e FPS View também fazem parte do layout persistido.
+                val minSide = size.minDimension
+                val joyCenter = Offset(joystickX.coerceIn(0f, 1f) * size.width, joystickY.coerceIn(0f, 1f) * size.height)
+                val joyRadius = (joystickRadius.takeIf { it.isFinite() } ?: 0.1f).coerceIn(0.01f, 0.5f) * minSide
+                drawCircle(Color(0xFF56D69A).copy(alpha = 0.07f), joyRadius, joyCenter)
+                drawCircle(Color(0xFF56D69A).copy(alpha = 0.8f), joyRadius, joyCenter, style = androidx.compose.ui.graphics.drawscope.Stroke(1.6f))
+
+                val lookCenter = Offset(lookX.coerceIn(0f, 1f) * size.width, lookY.coerceIn(0f, 1f) * size.height)
+                val lookSafeRadius = (lookRadius.takeIf { it.isFinite() } ?: 0.35f).coerceIn(0.01f, 1f) * minSide
+                drawCircle(Color(0xFF62B6F2).copy(alpha = 0.035f), lookSafeRadius, lookCenter)
+                drawCircle(Color(0xFF62B6F2).copy(alpha = 0.42f), lookSafeRadius, lookCenter, style = androidx.compose.ui.graphics.drawscope.Stroke(1.2f))
             }
             if (controls.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("SEM CONTROLES PADRÃO", color = Color(0xFFA7BAC8), style = MaterialTheme.typography.labelMedium)
+                    Text("SEM BOTÕES MAPEADOS", color = Color(0xFFA7BAC8), style = MaterialTheme.typography.labelMedium)
                 }
             }
             Box(
-                Modifier.fillMaxSize().pointerInput(controls, widthPx, heightPx) {
+                Modifier.fillMaxSize().pointerInput(controls, widthPx, heightPx, gridSnap, canMove) {
                     detectDragGestures(
                         onDragStart = { start ->
+                            if (!canMove) {
+                                draggingId = null
+                                return@detectDragGestures
+                            }
                             val candidate = controls.mapNotNull { control ->
                                 val point = previewPositions[control.id] ?: Offset(control.x, control.y)
                                 val dx = point.x * widthPx - start.x
@@ -519,6 +561,7 @@ private fun LayoutPreviewPanel(
                             candidate?.let(onSelect)
                         },
                         onDrag = { change, _ ->
+                            if (!canMove) return@detectDragGestures
                             val id = draggingId ?: return@detectDragGestures
                             var nextX = (change.position.x / widthPx).coerceIn(0.02f, 0.98f)
                             var nextY = (change.position.y / heightPx).coerceIn(0.02f, 0.98f)
@@ -533,9 +576,7 @@ private fun LayoutPreviewPanel(
                         },
                         onDragEnd = {
                             val id = draggingId
-                            if (id != null) previewPositions[id]?.let { position ->
-                                onMove(id, position.x, position.y)
-                            }
+                            if (id != null) previewPositions[id]?.let { position -> onMove(id, position.x, position.y) }
                             draggingId = null
                         },
                         onDragCancel = {
@@ -550,9 +591,16 @@ private fun LayoutPreviewPanel(
                     )
                 }
             ) {
-                controls.take(64).forEach { control ->
+                controls.take(128).forEach { control ->
                     val markerSize = 34.dp
                     val position = previewPositions[control.id] ?: Offset(control.x, control.y)
+                    val markerColor = when (control.kind) {
+                        Kind.FIRE -> Color(0xFF9B3939)
+                        Kind.AIM -> Color(0xFF176B54)
+                        Kind.SWIPE -> Color(0xFF6650A4)
+                        Kind.MACRO -> Color(0xFF98612D)
+                        else -> Color(0xFF193C50)
+                    }
                     Box(
                         Modifier.offset(
                             x = maxWidth * position.x - markerSize / 2,
@@ -560,13 +608,23 @@ private fun LayoutPreviewPanel(
                         )
                             .size(markerSize)
                             .clip(CircleShape)
-                            .background(if (control.id == selectedId) MaterialTheme.colorScheme.primary else Color(0xFF193C50))
+                            .background(if (control.id == selectedId) MaterialTheme.colorScheme.primary else markerColor)
                             .border(1.dp, if (control.id == selectedId) Color.White else Color(0xFF79B9D0), CircleShape)
                             .clickable { onSelect(control.id) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            if (control.key == 0) "?" else keyLabel(control.key).take(4),
+                            when (control.kind) {
+                                Kind.FIRE -> "F"
+                                Kind.AIM -> "◎"
+                                Kind.SWIPE -> "↗"
+                                Kind.MACRO -> "M"
+                                else -> when (control.mode) {
+                                    Mode.TAP -> "T"
+                                    Mode.RAPID -> "R"
+                                    else -> if (control.key == 0) "H" else keyLabel(control.key).take(4)
+                                }
+                            },
                             color = if (control.id == selectedId) MaterialTheme.colorScheme.onPrimary else Color.White,
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1
@@ -575,8 +633,19 @@ private fun LayoutPreviewPanel(
                 }
             }
         }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Spacer(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF56D69A)))
+                Text("WASD", style = MaterialTheme.typography.labelSmall)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Spacer(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF62B6F2)))
+                Text("FPS View", style = MaterialTheme.typography.labelSmall)
+            }
+        Text("F = Fire · ◎ = Aim · ↗ = Swipe · M = Macro · T/H = Tap/Hold", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Text(
-            "Arraste um marcador para reposicionar a tecla. A posição é salva no perfil do aplicativo; o HUD ao vivo continua disponível para ajustes finos.",
+            "Arraste qualquer marcador para reposicionar. As áreas WASD/FPS View são referências visuais; para ajustar o raio e o comportamento, use as configurações do perfil.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -597,7 +666,7 @@ private fun ControlTablePanel(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("CONTROLE", Modifier.weight(1.35f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-            Text("TECLA", Modifier.weight(0.8f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text("ATALHO", Modifier.weight(0.8f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             Text("MODO", Modifier.weight(0.8f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             Text("AÇÃO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
@@ -605,7 +674,6 @@ private fun ControlTablePanel(
             EmptyWorkspaceState("Nenhum mapeamento cadastrado", "Adicione um controle de tecla para criar a primeira associação.")
         } else {
             controls.take(128).forEach { control ->
-                val standard = control.kind == Kind.STANDARD
                 Row(
                     Modifier.fillMaxWidth()
                         .clip(RoundedCornerShape(9.dp))
@@ -617,20 +685,16 @@ private fun ControlTablePanel(
                 ) {
                     Column(Modifier.weight(1.35f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                         Text(control.displayName(), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("ID ${control.id}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${MappingEditorPolicy.controlDisplayLabel(control.kind, control.mode, control.isCombo || control.macro.isNotEmpty()).uppercase()} · ID ${control.id}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Text(keyLabel(control.key), Modifier.weight(0.8f), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(modeLabel(control.mode), Modifier.weight(0.8f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (standard) {
-                        OutlinedButton(
-                            onClick = { onSelect(control.id); onConfigure(control.id) },
-                            enabled = canConfigure,
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                        ) {
-                            Icon(Icons.Filled.Settings, contentDescription = "Configurar ${control.displayName()}", modifier = Modifier.size(15.dp))
-                        }
-                    } else {
-                        Text("LEGADO", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                    Text(if (control.kind == Kind.MACRO) "Sequência" else modeLabel(control.mode), Modifier.weight(0.8f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    OutlinedButton(
+                        onClick = { onSelect(control.id); onConfigure(control.id) },
+                        enabled = canConfigure,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Configurar ${control.displayName()}", modifier = Modifier.size(15.dp))
                     }
                 }
                 androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
@@ -641,23 +705,32 @@ private fun ControlTablePanel(
 
 @Composable
 private fun ControlPropertiesPanel(control: HudButton?, canConfigure: Boolean, onConfigure: () -> Unit) {
-    WorkspacePanel("Propriedades", "Selecione uma linha ou marcador da prévia") {
+    WorkspacePanel("Propriedades", "Parâmetros do controle selecionado") {
         if (control == null) {
-            EmptyWorkspaceState("Nenhum controle selecionado", "Os parâmetros serão exibidos aqui.")
-        } else if (control.kind != Kind.STANDARD) {
-            Surface(color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f), shape = RoundedCornerShape(10.dp)) {
-                Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
-                    Text("Este é um controle especializado legado. Esta versão do workspace expõe edição apenas para associações padrão.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
+            EmptyWorkspaceState("Nenhum controle selecionado", "Selecione um marcador ou uma linha da tabela.")
         } else {
+            PropertyLine("Tipo", MappingEditorPolicy.controlDisplayLabel(control.kind, control.mode, control.isCombo || control.macro.isNotEmpty()))
             PropertyLine("Nome", control.displayName())
             PropertyLine("Tecla", keyLabel(control.key))
-            PropertyLine("Modo", modeLabel(control.mode))
+            PropertyLine("Modo", if (control.kind == Kind.MACRO) "Sequência temporizada" else modeLabel(control.mode))
             PropertyLine("Posição X", "${(control.x * 100).toInt()}%")
             PropertyLine("Posição Y", "${(control.y * 100).toInt()}%")
             PropertyLine("Tamanho", "${(control.size * 100).toInt()}%")
+            when (control.kind) {
+                Kind.FIRE -> PropertyLine("Vínculo de mira", if (control.linkAimId >= 0) "Mira #${control.linkAimId}" else "Nenhum")
+                Kind.AIM -> {
+                    PropertyLine("Sensibilidade X/Y", "${control.aimSensX} / ${control.aimSensY}")
+                    PropertyLine("Mouse move a câmera", if (control.mouseAim) "Sim" else "Não")
+                    PropertyLine("Mira alternável", if (control.aimToggle) "Sim" else "Não")
+                }
+                Kind.SWIPE -> {
+                    PropertyLine("Destino X/Y", "${(control.swipeEndX * 100).toInt()}% / ${(control.swipeEndY * 100).toInt()}%")
+                    PropertyLine("Duração", "${control.swipeDurationMs} ms")
+                }
+            }
+            if (control.kind == Kind.STANDARD && control.mode == Mode.RAPID) {
+                PropertyLine("Intervalo", "${control.rapidIntervalMs} ms")
+            }
             Button(onClick = onConfigure, enabled = canConfigure, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(17.dp))
                 Text("  Abrir propriedades completas")
@@ -680,41 +753,190 @@ private fun WorkspaceActionsPanel(
     canEdit: Boolean,
     onLaunch: () -> Unit,
     onBeginEdit: () -> Unit,
-    onAddControl: () -> Unit,
-    onOpenSettings: () -> Unit
+    onAddControl: (Int, Int, String) -> Unit,
+    onOpenSettings: (Int) -> Unit
 ) {
-    WorkspacePanel("Ferramentas do editor", "Ações conectadas ao perfil ativo") {
-        Button(onClick = onAddControl, enabled = canEdit, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.Keyboard, contentDescription = null, modifier = Modifier.size(17.dp))
-            Text("  Adicionar tecla")
+    WorkspacePanel("Biblioteca HUD", "Controles principais e áreas configuráveis do perfil") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            ControlLibraryTile("Tap", "tap", "Toque único", Color(0xFFE0B84E), canEdit, Modifier.weight(1f)) {
+                onAddControl(Kind.STANDARD, Mode.TAP, "Tap")
+            }
+            ControlLibraryTile("Hold", "hold", "Segurar", Color(0xFF42A5C5), canEdit, Modifier.weight(1f)) {
+                onAddControl(Kind.STANDARD, Mode.HOLD, "Hold")
+            }
+            ControlLibraryTile("Fire", "fire", "Disparo dedicado · M1", Color(0xFFE05A63), canEdit, Modifier.weight(1f)) {
+                onAddControl(Kind.FIRE, Mode.HOLD, "Fire")
+            }
+            ControlLibraryTile("WASD / Stick", "move", "Configurar zona virtual", Color(0xFF8E78D5), canEdit, Modifier.weight(1f)) {
+                // A zona do perfil é a implementação virtual única de WASD; o backend ainda
+                // não captura eixos analógicos HID de gamepads.
+                onOpenSettings(2)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            ControlLibraryTile("Aim / Sight", "aim", "Visão e câmera", Color(0xFF45B78A), canEdit, Modifier.weight(1.5f)) {
+                onAddControl(Kind.AIM, Mode.HOLD, "Aim / Sight")
+            }
+            ControlLibraryTile("Swipe", "swipe", "Arrastar origem → destino", Color(0xFF8E78D5), canEdit, Modifier.weight(1.5f)) {
+                onAddControl(Kind.SWIPE, Mode.HOLD, "Swipe")
+            }
         }
         OutlinedButton(onClick = onBeginEdit, enabled = canEdit, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(17.dp))
+            Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
             Text("  Editar HUD ao vivo")
-        }
-        OutlinedButton(onClick = onLaunch, enabled = canLaunch, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.Launch, contentDescription = null, modifier = Modifier.size(17.dp))
-            Text("  Abrir aplicativo")
-        }
-        OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(17.dp))
-            Text("  Configurações gerais")
         }
         if (!canEdit) {
             Text(
-                "Para editar, inicie o serviço, conceda a sobreposição e deixe o aplicativo deste perfil em primeiro plano.",
+                "Para adicionar ou configurar controles, inicie o serviço, conceda a sobreposição e deixe o aplicativo deste perfil em primeiro plano.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
+
+    WorkspacePanel("Avançado", "Ferramentas adicionais e estado real de implementação") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            ControlLibraryTile("Combo", "combo", "Aciona vários controles juntos", Color(0xFFD18A49), canEdit, Modifier.weight(1f)) {
+                onAddControl(Kind.STANDARD, Mode.HOLD, "Combo")
+            }
+            ControlLibraryTile("Rapid Tap", "rapid", "Repete até soltar · intervalo ajustável", Color(0xFFD18A49), canEdit, Modifier.weight(1f)) {
+                onAddControl(Kind.STANDARD, Mode.RAPID, "Rapid Tap")
+            }
+            ControlLibraryTile("Macro", "macro", "Macro sequencial · pausas, toques, arrastos e cancelamento", Color(0xFFD18A49), canEdit, Modifier.weight(1f)) {
+                onAddControl(Kind.MACRO, Mode.HOLD, "Macro")
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Column(Modifier.fillMaxWidth().padding(7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Scroll", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Text("Global: roda vertical → Page Up/Down; horizontal → setas. Não é um controle HUD independente.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(
+            "Movimento: zona virtual WASD. Entrada analógica física de gamepad ainda não implementada.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OutlinedButton(onClick = onLaunch, enabled = canLaunch, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Launch, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text("  Abrir aplicativo")
+        }
+    }
 }
 
 @Composable
-private fun EmulatorSettingsPanel(onOpenSettings: () -> Unit) {
+private fun ControlLibraryTile(
+    title: String,
+    glyph: String,
+    description: String,
+    accent: Color,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        modifier.clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (enabled) 0.48f else 0.20f))
+            .border(1.dp, accent.copy(alpha = if (enabled) 0.58f else 0.22f), shape)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 7.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(
+            Modifier.size(27.dp).clip(RoundedCornerShape(8.dp)).background(accent.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center
+        ) {
+            ControlLibraryVectorIcon(glyph, accent)
+        }
+        Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun ControlLibraryVectorIcon(kind: String, tint: Color) {
+    Canvas(Modifier.size(22.dp)) {
+        val w = size.width
+        val h = size.height
+        val c = Offset(w * 0.5f, h * 0.5f)
+        val stroke = w * 0.075f
+        val ring = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        when (kind) {
+            "tap" -> {
+                drawCircle(tint, radius = w * 0.18f, center = c)
+                drawLine(tint, Offset(w * 0.70f, h * 0.28f), Offset(w * 0.88f, h * 0.10f), strokeWidth = stroke)
+                drawLine(tint, Offset(w * 0.74f, h * 0.48f), Offset(w * 0.96f, h * 0.48f), strokeWidth = stroke)
+            }
+            "hold" -> {
+                drawCircle(tint, radius = w * 0.29f, center = c, style = ring)
+                drawCircle(tint, radius = w * 0.10f, center = c)
+            }
+            "fire" -> {
+                val flame = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(w * 0.52f, h * 0.04f)
+                    cubicTo(w * 0.47f, h * 0.28f, w * 0.88f, h * 0.39f, w * 0.78f, h * 0.72f)
+                    cubicTo(w * 0.70f, h * 0.98f, w * 0.29f, h * 0.99f, w * 0.19f, h * 0.73f)
+                    cubicTo(w * 0.06f, h * 0.45f, w * 0.39f, h * 0.33f, w * 0.42f, h * 0.12f)
+                    cubicTo(w * 0.44f, h * 0.35f, w * 0.66f, h * 0.44f, w * 0.56f, h * 0.67f)
+                    cubicTo(w * 0.46f, h * 0.58f, w * 0.35f, h * 0.72f, w * 0.46f, h * 0.86f)
+                    cubicTo(w * 0.61f, h * 0.82f, w * 0.66f, h * 0.66f, w * 0.59f, h * 0.53f)
+                    close()
+                }
+                drawPath(flame, tint)
+            }
+            "move" -> {
+                drawCircle(tint, radius = w * 0.25f, center = c, style = ring)
+                drawLine(tint, Offset(c.x, h * 0.05f), Offset(c.x, h * 0.95f), strokeWidth = stroke)
+                drawLine(tint, Offset(w * 0.05f, c.y), Offset(w * 0.95f, c.y), strokeWidth = stroke)
+                drawCircle(tint, radius = w * 0.07f, center = c)
+            }
+            "aim" -> {
+                drawCircle(tint, radius = w * 0.26f, center = c, style = ring)
+                drawCircle(tint, radius = w * 0.06f, center = c)
+                drawLine(tint, Offset(c.x, 0f), Offset(c.x, h * 0.20f), strokeWidth = stroke)
+                drawLine(tint, Offset(c.x, h * 0.80f), Offset(c.x, h), strokeWidth = stroke)
+                drawLine(tint, Offset(0f, c.y), Offset(w * 0.20f, c.y), strokeWidth = stroke)
+                drawLine(tint, Offset(w * 0.80f, c.y), Offset(w, c.y), strokeWidth = stroke)
+            }
+            "swipe" -> {
+                drawLine(tint, Offset(w * 0.12f, h * 0.82f), Offset(w * 0.78f, h * 0.18f), strokeWidth = stroke)
+                drawLine(tint, Offset(w * 0.48f, h * 0.18f), Offset(w * 0.78f, h * 0.18f), strokeWidth = stroke)
+                drawLine(tint, Offset(w * 0.78f, h * 0.18f), Offset(w * 0.78f, h * 0.48f), strokeWidth = stroke)
+            }
+            "macro" -> {
+                drawCircle(tint, radius = w * 0.34f, center = c, style = ring)
+                drawLine(tint, Offset(w * 0.50f, h * 0.18f), Offset(w * 0.50f, h * 0.50f), strokeWidth = stroke)
+                drawLine(tint, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.73f, h * 0.50f), strokeWidth = stroke)
+                drawCircle(tint, radius = w * 0.06f, center = Offset(w * 0.50f, h * 0.18f))
+                drawCircle(tint, radius = w * 0.06f, center = Offset(w * 0.73f, h * 0.50f))
+            }
+            "combo" -> {
+                val a = Offset(w * 0.22f, h * 0.22f)
+                val b = Offset(w * 0.78f, h * 0.22f)
+                val d = Offset(w * 0.50f, h * 0.78f)
+                drawLine(tint, a, b, strokeWidth = stroke)
+                drawLine(tint, a, d, strokeWidth = stroke)
+                drawLine(tint, b, d, strokeWidth = stroke)
+                drawCircle(tint, w * 0.13f, a)
+                drawCircle(tint, w * 0.13f, b)
+                drawCircle(tint, w * 0.13f, d)
+            }
+            "rapid" -> {
+                drawCircle(tint, radius = w * 0.27f, center = c, style = ring)
+                drawLine(tint, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.50f, h * 0.25f), strokeWidth = stroke)
+                drawLine(tint, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.72f, h * 0.62f), strokeWidth = stroke)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmulatorSettingsPanel(onOpenSettings: (Int) -> Unit) {
     WorkspacePanel("Configuração do emulador", "Ajustes globais e de display") {
         Text("Atalhos, cursor, área de mapeamento, desempenho, DeX e compatibilidade ficam nas configurações gerais.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { onOpenSettings(2) }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(17.dp))
             Text("  Abrir painel de ajustes")
         }
@@ -757,6 +979,7 @@ private fun modeLabel(mode: Int): String = when (mode) {
     Mode.TAP -> "Toque"
     Mode.TOGGLE -> "Alternar"
     Mode.DOUBLE -> "Duplo"
+    Mode.RAPID -> "Rapid Tap"
     else -> "Segurar"
 }
 

@@ -511,7 +511,7 @@ private fun PointerTab(d: AppSettings, edit: Edit) {
     Section("Sensibilidade")
     SliderRow(
         "Sensibilidade global", "Multiplica todos os botões, inclusive os de mira.",
-        d.globalSens, 0.2f, 3f, 0.05f, absMin = 0f, absMax = 1000f
+        d.globalSens, 0.2f, 3f, 0.05f, absMin = 0.01f, absMax = 10f
     ) { v -> edit { it.copy(globalSens = v) } }
     SliderRow(
         "Eixo X (horizontal)", "Velocidade horizontal da câmera. 1.0 = igual ao mouse. Digite até 1000.",
@@ -817,7 +817,14 @@ private fun AppsTab(ctx: Context, d: AppSettings, edit: Edit, state: ActivationS
         filtered.forEach { (pkg, label, _) ->
             ListItem(
                 headlineContent = { Text(label, maxLines = 1) },
-                supportingContent = { Text(pkg, maxLines = 1) },
+                supportingContent = {
+                    val profile = d.profiles[pkg]
+                    Text(
+                        if (profile == null) "$pkg · Usa ajustes globais até personalizar"
+                        else "$pkg · Perfil próprio · ${profile.buttons.size} controles",
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                },
                 trailingContent = {
                     Switch(
                         checked = pkg in d.games,
@@ -835,7 +842,7 @@ private fun AppsTab(ctx: Context, d: AppSettings, edit: Edit, state: ActivationS
         }
     }
     Text(
-        "Os aplicativos selecionados compartilham atualmente as configurações e o layout de controles globais. A seleção não garante que todo app aceite eventos injetados: isso depende do Android, do método de entrada e do próprio aplicativo.",
+        "Cada aplicativo pode ter seu próprio layout, teclas e sensibilidade. Com a ativação por aplicativo ligada e o perfil correspondente em primeiro plano, as alterações são salvas no pacote daquele app; sem esse modo, a configuração editada é global. Um app sem perfil próprio usa os ajustes globais como base. A compatibilidade de eventos ainda depende do Android, do firmware e do aplicativo.",
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -922,7 +929,7 @@ private fun AimTab(d: AppSettings, edit: Edit) {
     Section("Mira e câmera")
     SliderRow(
         "Sensibilidade global", "Multiplica todos os botões, inclusive os de mira. 1.0 = sem mudança.",
-        d.globalSens, 0.2f, 3f, 0.05f, absMin = 0f, absMax = 1000f
+        d.globalSens, 0.2f, 3f, 0.05f, absMin = 0.01f, absMax = 10f
     ) { v -> edit { it.copy(globalSens = v) } }
     SliderRow(
         "Tamanho da área de câmera", "Define o raio visual e de interação da zona Sight no HUD/editor. Não altera o limite físico de injeção nem o intervalo de recentralização do toque.",
@@ -1069,11 +1076,15 @@ private fun KeysTab(
     d.buttons.forEach { b ->
         val kind = when {
             b.kind == Kind.AIM -> if (b.aimToggle) "mira (suspender)" else "mira (segurar)"
-            b.kind == Kind.FIRE -> if (b.mode == Mode.TAP) "tiro (toque único)" else "tiro (segurar contínuo)"
-            b.macro.isNotEmpty() -> "padrão (macro: ${b.macro.size} botões)"
-            b.mode == Mode.TOGGLE -> "padrão (toggle)"
-            b.mode == Mode.TAP -> "padrão (toque)"
-            else -> "padrão (segurar)"
+            b.kind == Kind.FIRE -> if (b.mode == Mode.TAP) "Fire (toque único)" else "Fire (segurar contínuo)"
+            b.kind == Kind.SWIPE -> "Swipe (arrastar)"
+            b.kind == Kind.MACRO -> "Macro sequencial (${b.sequence.size} etapas × ${b.sequenceRepeatCount})"
+            b.isCombo || b.macro.isNotEmpty() -> "Combo simultâneo (${b.macro.size} destinos)"
+            b.mode == Mode.RAPID -> "Rapid Tap (intervalo ${b.rapidIntervalMs} ms)"
+            b.mode == Mode.TOGGLE -> "padrão (alternar)"
+            b.mode == Mode.DOUBLE -> "padrão (duplo toque)"
+            b.mode == Mode.TAP -> "Tap (toque único)"
+            else -> "Hold (pressionamento mantido)"
         }
         InfoRow("${b.displayName()} (${keyLabel(b.key)})", kind)
     }

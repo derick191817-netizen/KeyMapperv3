@@ -40,6 +40,9 @@ def main() -> None:
     wrapper = read("gradle/wrapper/gradle-wrapper.properties")
     app_gradle = read("app/build.gradle.kts")
     workflow = read(".github/workflows/build.yml")
+    gradle_properties = read("gradle.properties")
+    if "android.jetifier.ignorelist=bc.*-jdk18on" not in gradle_properties:
+        fail("Jetifier ignorelist para JARs multi-release Bouncy Castle está ausente")
 
     agp = require(
         r'id\("com\.android\.application"\)\s+version\s+"([0-9.]+)"',
@@ -94,8 +97,8 @@ def main() -> None:
 
     code = require(r"versionCode\s*=\s*(\d+)", app_gradle, "versionCode").group(1)
     name = require(r'versionName\s*=\s*"([0-9.]+)"', app_gradle, "versionName").group(1)
-    if (code, name) != ("71", "0.14.55"):
-        fail(f"versão do módulo {(code, name)} diverge da release auditada (71, 0.14.55)")
+    if (code, name) != ("81", "0.14.65"):
+        fail(f"versão do módulo {(code, name)} diverge da release auditada (81, 0.14.65)")
     artifact = f"keymapper-{name}-debug"
     if f"name: {artifact}" not in workflow:
         fail(f"nome do artefato CI não corresponde ao versionName: esperado {artifact}")

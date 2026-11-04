@@ -1,0 +1,51 @@
+KEYMAPPER 0.14.64 — RESULTADOS DE VALIDACAO
+============================================================
+versionName: 0.14.64
+versionCode: 80
+Gradle: 8.8 (Wrapper; distribuicao nao baixada neste ambiente)
+AGP: 8.5.2
+Kotlin/Compose plugin: 2.4.21
+JDK do runner configurado: 17
+compileSdk: 34
+NDK: 26.3.11579264
+CMake: 3.22.1
+CI artifact esperado: keymapper-0.14.64-debug
+
+PASS — bash tools/native-tests/run.sh
+  EVDEV batch recovery e keyboard HID classification host tests.
+PASS — bash tools/native-tests/check-syntax.sh
+  Sintaxe C++17 para evdev_capture.cpp e uinput_touch.cpp.
+PASS — bash tools/native-tests/check-library-contract.sh
+  CMake target, nome JNI, biblioteca empacotada e diagnóstico consistentes.
+PASS — bash tools/dependency-tests/check-kadb-coordinates.sh
+  Kadb Android 2.1.4 + mDNS Android 2.1.3 e versão/artefato 0.14.64.
+PASS — bash tools/dependency-tests/check-jetifier-ignorelist.sh
+  Ignorelist restrita aos artefatos Bouncy Castle jdk18on.
+PASS — bash tools/dependency-tests/test-kadb-selected-version.sh
+  Verificador de dependência aceita a combinação esperada e rejeita versões inválidas.
+PASS — todos os scripts tools/architecture-tests/*.sh
+  HUD, Overlay, Shizuku, sessão idempotente, controles, Macro, ownership por origem e recuperação de perfis.
+PASS — python3 tools/build-tests/check-toolchain-compatibility.py
+  Matriz Kotlin/AGP/Gradle, JDK, SDK, NDK, CMake e artefato.
+PASS — python3 tools/build-tests/test-toolchain-compatibility.py
+  Casos negativos de configuração são rejeitados.
+PASS — harness Kotlin local
+  ControlPressOwnership, AimActivationRegistry e SettingsRecoveryPolicy; múltiplas origens físicas/Combo, tap transitório sobre hold, soltura parcial, toggle, seleção da mira e perfis inválidos.
+PASS — integridade dos arquivos da entrega
+  ZIPs testados depois da criação e SHA-256 recalculado.
+
+BLOCKED — ./gradlew --no-daemon --version --stacktrace --console=plain
+  O Wrapper tentou baixar https://services.gradle.org/distributions/gradle-8.8-bin.zip e terminou com:
+  java.net.UnknownHostException: services.gradle.org
+  O Gradle nao iniciou; portanto isso nao e resultado positivo nem falha de compilacao do projeto.
+
+NAO EXECUTADO
+- :app:lintDebug
+- :app:testDebugUnitTest via Gradle/JUnit
+- :app:assembleDebug
+- Android instrumentation tests
+- teste fisico no Samsung Galaxy Note 20 Ultra / Android 13 / One UI / Samsung DeX
+- teste de roteamento de toque em todos os displays e backends reais
+
+CONCLUSAO
+Os testes host, verificadores estaticos/arquiteturais e harness Kotlin passaram. Build Android, APK e hardware permanecem pendentes porque o Wrapper nao conseguiu baixar Gradle 8.8 por falha DNS. Este ZIP e codigo-fonte, nao APK.

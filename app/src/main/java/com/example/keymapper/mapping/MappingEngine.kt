@@ -10,6 +10,10 @@ import com.example.keymapper.data.AppSettings
 import com.example.keymapper.data.HudButton
 import com.example.keymapper.data.Kind
 import com.example.keymapper.data.Mode
+import com.example.keymapper.data.MacroAction
+import com.example.keymapper.data.MacroStep
+import com.example.keymapper.data.MacroSequenceCursor
+import com.example.keymapper.data.MacroStepPolicy
 import com.example.keymapper.data.Rot
 import com.example.keymapper.diagnostics.InputDiagnostics
 import com.example.keymapper.injection.TouchInjector
@@ -22,7 +26,12 @@ import com.example.keymapper.input.VirtualCursorController
 import com.example.keymapper.display.CoordinateTransformer
 import com.example.keymapper.domain.SensitivityEngine
 import com.example.keymapper.domain.InputBindingPolicy
+import com.example.keymapper.domain.ControlBehaviorPolicy
 import com.example.keymapper.domain.PerformancePolicy
+import com.example.keymapper.domain.ControlPressOwnership
+import com.example.keymapper.domain.AimActivationRegistry
+import com.example.keymapper.domain.PressSource
+import com.example.keymapper.domain.PressSourceKind
 import kotlin.math.hypot
 import kotlin.math.min
 
@@ -74,10 +83,27 @@ class MappingEngine(
     private val virtualCursor = VirtualCursorController()
     private val keys = HashSet<Int>()
     private val held = HashSet<Int>()      // todas as teclas/botões atualmente pressionados
-    private val toggled = HashSet<Int>()
+    private data class ToggleActivation(val controlId: Int, val source: PressSource)
+    private val toggled = HashSet<ToggleActivation>()
     // Ações atrasadas (toques, duplo toque e delay configurado) são rastreadas para
     // que a desativação/ perda de foco não execute eventos obsoletos depois de releaseAll().
     private val pendingActions = LinkedHashSet<Runnable>()
+    // Repetição só existe enquanto a tecla física permanecer pressionada.
+    private val repeatActions = HashMap<Int, Runnable>()
+    // Swipe mantém o ponteiro e a tarefa associados ao controle até concluir/cancelar o gesto.
+    private val swipeActions = HashMap<Int, Runnable>()
+    private val swipePointerIds = HashMap<Int, Int>()
+    // Macro sequencial possui uma única tarefa/ponteiro por controle e cancela na soltura.
+    private class MacroRun(
+        val buttonId: Int,
+        val keyCode: Int,
+        val pointerId: Int,
+        val cursor: MacroSequenceCursor,
+        val targets: Map<Int, HudButton>,
+        var pointerDown: Boolean = false,
+        var task: Runnable? = null
+    )
+    private val macroRuns = HashMap<Int, MacroRun>()
 
     // Uma fila primitiva preserva a ordem global entre mouse/teclas/scroll sem um Handler.post
     // por amostra. O consumidor e todos os estados do motor continuam na thread do TouchInjector.
@@ -89,6 +115,10 @@ class MappingEngine(
     // IDs de ponteiro Android são limitados a 0..31. IDs de botão são alocados sem colisão
     // e liberados junto com o contato; isso evita colisões após criar/apagar muitos controles.
     private val buttonPointerIds = HashMap<Int, Int>()
+    // Fontes distintas podem manter o mesmo contato ativo (ex.: Fire ligado à mira + tecla da mira).
+    private val pressOwnership = ControlPressOwnership()
+    private val aimActivations = AimActivationRegistry()
+    private var transientPressSequence = 0L
     private var joyActive = false
     private var lookActive = false
     private var lookId = LOOK_A
@@ -143,6 +173,16 @@ class MappingEngine(
 
     private fun pointerId(b: HudButton): Int? {
         buttonPointerIds[b.id]?.let { return it }
+        // A control may be deleted while a rejected ACTION_UP is awaiting retry. Reclaim its
+        // pointer ID only after TouchInjector confirms that contact is no longer active.
+        val activeControlIds = cfg().buttons.mapTo(HashSet()) { it.id }
+        val iterator = buttonPointerIds.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.key !in activeControlIds && !touch.isDown(entry.value) &&
+                !touch.isReleasePending(entry.value)
+            ) iterator.remove()
+        }
         val used = buttonPointerIds.values.toHashSet()
         val candidate = (2..29).firstOrNull { it !in used } ?: if (31 !in used) 31 else null
         if (candidate != null) buttonPointerIds[b.id] = candidate
@@ -491,6 +531,17 @@ class MappingEngine(
         touch.handler.removeCallbacks(flushLook)
         pendingActions.toList().forEach { touch.handler.removeCallbacks(it) }
         pendingActions.clear()
+        repeatActions.values.toList().forEach { touch.handler.removeCallbacks(it) }
+        repeatActions.clear()
+        macroRuns.values.toList().forEach { run ->
+            run.task?.let { touch.handler.removeCallbacks(it) }
+            if (run.pointerDown || touch.isDown(run.pointerId)) touch.up(run.pointerId)
+            run.pointerDown = false
+        }
+        macroRuns.clear()
+        swipeActions.values.toList().forEach { touch.handler.removeCallbacks(it) }
+        swipeActions.clear()
+        swipePointerIds.clear()
         synchronized(lookLock) {
             pendX = 0f
             pendY = 0f
@@ -502,6 +553,8 @@ class MappingEngine(
         held.clear()
         toggled.clear()
         buttonPointerIds.clear()
+        pressOwnership.clear()
+        aimActivations.clear()
         scrollAccumulator.reset()
         joyActive = false
         lookActive = false
@@ -545,27 +598,222 @@ class MappingEngine(
                     fireKey(b, down)
                     linkAim(b, s, down)
                 }
+                Kind.SWIPE -> swipeKey(b, down)
+                Kind.MACRO -> macroKey(b, s, down)
                 else -> standardKey(b, s, down)
             }
         }
     }
 
-    /** TIRO: HOLD = DOWN ao apertar e UP só ao soltar a tecla; TAP = toque único. */
-    private fun fireKey(b: HudButton, down: Boolean) {
-        if (b.mode == Mode.TAP) {
-            if (down) tap(b)
-        } else {
-            if (down) press(b) else release(b)
+    /** Macro: executa passos em série, com repetição finita e cancelamento na soltura. */
+    private fun macroKey(b: HudButton, settings: AppSettings, down: Boolean) {
+        if (down) startMacro(b, settings) else cancelMacro(b.id)
+    }
+
+    private fun startMacro(button: HudButton, settings: AppSettings) {
+        if (paused || macroRuns.containsKey(button.id) || button.sequence.isEmpty()) return
+        val pointer = pointerId(button) ?: return
+        val targets = settings.buttons.associateBy { it.id }
+        val safeSteps = MacroStepPolicy.normalizeSteps(button.sequence, button.id, settings.buttons)
+        if (safeSteps.isEmpty()) return
+        val run = MacroRun(
+            buttonId = button.id,
+            keyCode = button.key,
+            pointerId = pointer,
+            cursor = MacroSequenceCursor(safeSteps, button.sequenceRepeatCount),
+            targets = targets
+        )
+        macroRuns[button.id] = run
+        advanceMacro(run)
+    }
+
+    private fun isMacroActive(run: MacroRun): Boolean =
+        macroRuns[run.buttonId] === run && !paused && run.keyCode in held
+
+    private fun scheduleMacro(run: MacroRun, delayMs: Long, action: () -> Unit) {
+        if (!isMacroActive(run)) {
+            cancelMacro(run.buttonId)
+            return
+        }
+        lateinit var task: Runnable
+        task = Runnable {
+            if (run.task !== task || macroRuns[run.buttonId] !== run) return@Runnable
+            run.task = null
+            if (!isMacroActive(run)) {
+                cancelMacro(run.buttonId)
+                return@Runnable
+            }
+            action()
+        }
+        run.task?.let { touch.handler.removeCallbacks(it) }
+        run.task = task
+        touch.handler.postDelayed(task, delayMs.coerceAtLeast(0L))
+    }
+
+    private fun advanceMacro(run: MacroRun) {
+        if (!isMacroActive(run)) {
+            cancelMacro(run.buttonId)
+            return
+        }
+        val step = run.cursor.nextStep() ?: run {
+            finishMacro(run)
+            return
+        }
+        when (step.action) {
+            MacroAction.WAIT -> scheduleMacro(run, MacroStepPolicy.durationMs(MacroAction.WAIT, step.durationMs).toLong()) {
+                advanceMacro(run)
+            }
+            MacroAction.TAP, MacroAction.HOLD -> {
+                val target = run.targets[step.targetId]
+                if (target == null || !MacroStepPolicy.isTargetEligible(step.action, target)) {
+                        advanceMacro(run)
+                    return
+                }
+                val bounds = area()
+                val point = CoordinateTransformer.normalizedToPixels(bounds, target.x, target.y)
+                touch.down(run.pointerId, point.x, point.y)
+                run.pointerDown = touch.isDown(run.pointerId)
+                if (!run.pointerDown) {
+                        advanceMacro(run)
+                    return
+                }
+                val holdMs = if (step.action == MacroAction.TAP) 25L
+                else MacroStepPolicy.durationMs(MacroAction.HOLD, step.durationMs).toLong()
+                scheduleMacro(run, holdMs) {
+                    if (run.pointerDown || touch.isDown(run.pointerId)) touch.up(run.pointerId)
+                    run.pointerDown = false
+                        advanceMacro(run)
+                }
+            }
+            MacroAction.SWIPE -> {
+                val target = run.targets[step.targetId]
+                if (target == null || !MacroStepPolicy.isTargetEligible(step.action, target)) {
+                        advanceMacro(run)
+                    return
+                }
+                startMacroSwipe(run, target, step)
+            }
+            else -> {
+                advanceMacro(run)
+            }
         }
     }
 
-    /** PADRÃO: simula qualquer tecla. Com macro, aciona os botões escolhidos (e não o próprio). */
-    private fun standardKey(b: HudButton, s: AppSettings, down: Boolean) {
-        if (b.macro.isNotEmpty()) {
-            for (id in b.macro) {
-                val t = s.buttons.firstOrNull { it.id == id } ?: continue
-                if (down) press(t) else if (!toggled.contains(t.id)) release(t)
+    private fun startMacroSwipe(run: MacroRun, target: HudButton, step: MacroStep) {
+        val bounds = area()
+        val start = CoordinateTransformer.normalizedToPixels(bounds, target.x, target.y)
+        val end = CoordinateTransformer.normalizedToPixels(bounds, target.swipeEndX, target.swipeEndY)
+        val duration = MacroStepPolicy.durationMs(MacroAction.SWIPE, step.durationMs).toLong()
+        val startedAt = SystemClock.uptimeMillis()
+        touch.down(run.pointerId, start.x, start.y)
+        run.pointerDown = touch.isDown(run.pointerId)
+        if (!run.pointerDown) {
+            advanceMacro(run)
+            return
+        }
+        fun tick() {
+            if (!isMacroActive(run)) {
+                cancelMacro(run.buttonId)
+                return
             }
+            val elapsed = (SystemClock.uptimeMillis() - startedAt).coerceAtLeast(0L)
+            val progress = ControlBehaviorPolicy.swipeProgress(elapsed, duration.toInt())
+            val point = ControlBehaviorPolicy.interpolateSwipe(
+                ControlBehaviorPolicy.Point(start.x, start.y),
+                ControlBehaviorPolicy.Point(end.x, end.y),
+                progress
+            )
+            touch.move(run.pointerId, point.x, point.y)
+            if (progress >= 1f) {
+                touch.move(run.pointerId, end.x, end.y)
+                touch.up(run.pointerId)
+                run.pointerDown = false
+                advanceMacro(run)
+            } else {
+                scheduleMacro(run, minOf(16L, (duration - elapsed).coerceAtLeast(1L)), ::tick)
+            }
+        }
+        scheduleMacro(run, minOf(16L, duration), ::tick)
+    }
+
+    private fun cancelMacro(controlId: Int) {
+        val run = macroRuns.remove(controlId) ?: return
+        run.task?.let { touch.handler.removeCallbacks(it) }
+        run.task = null
+        if (run.pointerDown || touch.isDown(run.pointerId)) touch.up(run.pointerId)
+        run.pointerDown = false
+        if (!touch.isDown(run.pointerId) && buttonPointerIds[controlId] == run.pointerId) {
+            buttonPointerIds.remove(controlId)
+        }
+    }
+
+    private fun finishMacro(run: MacroRun) {
+        if (macroRuns[run.buttonId] !== run) return
+        macroRuns.remove(run.buttonId)
+        run.task?.let { touch.handler.removeCallbacks(it) }
+        run.task = null
+        if (run.pointerDown || touch.isDown(run.pointerId)) touch.up(run.pointerId)
+        run.pointerDown = false
+        if (!touch.isDown(run.pointerId) && buttonPointerIds[run.buttonId] == run.pointerId) {
+            buttonPointerIds.remove(run.buttonId)
+        }
+    }
+
+    private fun derivedSource(kind: Int, parent: PressSource): PressSource = PressSource(
+        kind,
+        ((parent.kind.toLong() and 0xffff_ffffL) shl 32) or
+            (parent.sourceId and 0xffff_ffffL)
+    )
+
+    /** TIRO: HOLD = DOWN ao apertar e UP só ao soltar a tecla; TAP = toque único. */
+    private fun fireKey(
+        b: HudButton,
+        down: Boolean,
+        source: PressSource = PressSource(PressSourceKind.DIRECT, b.id.toLong())
+    ) {
+        if (b.mode == Mode.TAP) {
+            if (down) tap(b)
+        } else if (down) {
+            pressOwned(b, source)
+        } else {
+            releaseOwned(b, source)
+        }
+    }
+
+    /** PADRÃO: simula qualquer tecla. Com Combo, cada Combo possui sua própria origem de contato. */
+    private fun standardKey(
+        b: HudButton,
+        s: AppSettings,
+        down: Boolean,
+        source: PressSource = PressSource(PressSourceKind.DIRECT, b.id.toLong())
+    ) {
+        // Rapid Tap não usa o atraso de entrada comum: a soltura precisa cancelar a rajada já.
+        if (b.isCombo || b.macro.isNotEmpty()) {
+            // Combo é uma ferramenta independente: sem destinos configurados, não injeta toque.
+            val dispatchCombo = Runnable {
+                if (b.macro.isEmpty()) return@Runnable
+                val comboSource = PressSource(PressSourceKind.COMBO, b.id.toLong())
+                for (id in b.macro) {
+                    val target = s.buttons.firstOrNull { it.id == id } ?: continue
+                    if (!com.example.keymapper.domain.MappingEditorPolicy.isComboTargetEligible(b.id, target)) continue
+                    when (target.kind) {
+                        Kind.FIRE -> {
+                            fireKey(target, down, comboSource)
+                            linkAim(target, s, down, comboSource)
+                        }
+                        Kind.AIM -> aimKey(target, s, down, comboSource)
+                        Kind.SWIPE -> Unit // Swipe é deliberadamente excluído pela política do editor.
+                        Kind.MACRO -> Unit // Macro sequencial não pode ser aninhada em Combo.
+                        else -> standardKey(target, s, down, comboSource)
+                    }
+                }
+            }
+            val comboDelay = b.delayMs.toLong().coerceIn(0L, 500L)
+            if (comboDelay > 0L) scheduleAction(comboDelay, dispatchCombo) else dispatchCombo.run()
+            return
+        }
+        if (b.mode == Mode.RAPID) {
+            if (down) startRapidTap(b) else stopRapidTap(b)
             return
         }
         val act = Runnable {
@@ -573,17 +821,100 @@ class MappingEngine(
                 Mode.TAP -> if (down) tap(b)
                 Mode.DOUBLE -> if (down) doubleTap(b)
                 Mode.TOGGLE -> if (down) {
-                    if (toggled.remove(b.id)) release(b) else {
-                        toggled.add(b.id)
-                        press(b)
+                    val activation = ToggleActivation(b.id, source)
+                    if (toggled.remove(activation)) releaseOwned(b, source) else if (pressOwned(b, source)) {
+                        toggled.add(activation)
                     }
                 }
-                else -> if (down) press(b) else release(b)
+                Mode.RAPID -> if (down) startRapidTap(b) else stopRapidTap(b)
+                else -> if (down) pressOwned(b, source) else releaseOwned(b, source)
             }
         }
         // "Tempo de resposta": atraso fixo (a ordem dos eventos é preservada, pois o atraso é igual para todos)
         val delay = b.delayMs.toLong().coerceIn(0L, 500L)
         if (delay > 0L) scheduleAction(delay, act) else act.run()
+    }
+
+
+    /** Rapid Tap: primeiro toque imediato, depois repete no intervalo escolhido até a soltura. */
+    private fun startRapidTap(b: HudButton) {
+        if (repeatActions.containsKey(b.id) || paused) return
+        tap(b)
+        val interval = ControlBehaviorPolicy.rapidIntervalMs(b.rapidIntervalMs).toLong()
+        lateinit var repeat: Runnable
+        repeat = Runnable {
+            if (repeatActions[b.id] !== repeat) return@Runnable
+            if (paused || b.key !in held) {
+                repeatActions.remove(b.id)
+                return@Runnable
+            }
+            tap(b)
+            touch.handler.postDelayed(repeat, interval)
+        }
+        repeatActions[b.id] = repeat
+        touch.handler.postDelayed(repeat, interval)
+    }
+
+    private fun stopRapidTap(b: HudButton) {
+        repeatActions.remove(b.id)?.let { touch.handler.removeCallbacks(it) }
+    }
+
+    /** Swipe: gesto de ponteiro único, interpolado no handler do injetor e cancelável na soltura. */
+    private fun swipeKey(b: HudButton, down: Boolean) {
+        if (down) startSwipe(b) else finishSwipe(b.id)
+    }
+
+    private fun startSwipe(b: HudButton) {
+        if (paused || swipeActions.containsKey(b.id)) return
+        val pointer = pointerId(b) ?: return
+        val bounds = area()
+        val start = CoordinateTransformer.normalizedToPixels(bounds, b.x, b.y)
+        val end = CoordinateTransformer.normalizedToPixels(bounds, b.swipeEndX, b.swipeEndY)
+        val duration = ControlBehaviorPolicy.swipeDurationMs(b.swipeDurationMs).toLong()
+        val startedAt = SystemClock.uptimeMillis()
+        lateinit var task: Runnable
+        task = Runnable {
+            if (swipeActions[b.id] !== task) return@Runnable
+            if (paused || b.key !in held) {
+                finishSwipe(b.id)
+                return@Runnable
+            }
+            val elapsed = (SystemClock.uptimeMillis() - startedAt).coerceAtLeast(0L)
+            val progress = ControlBehaviorPolicy.swipeProgress(elapsed, duration.toInt())
+            val point = ControlBehaviorPolicy.interpolateSwipe(
+                ControlBehaviorPolicy.Point(start.x, start.y),
+                ControlBehaviorPolicy.Point(end.x, end.y),
+                progress
+            )
+            touch.move(pointer, point.x, point.y)
+            if (progress >= 1f) {
+                touch.move(pointer, end.x, end.y)
+                touch.up(pointer)
+                swipeActions.remove(b.id)
+                swipePointerIds.remove(b.id)
+                if (buttonPointerIds[b.id] == pointer) buttonPointerIds.remove(b.id)
+            } else {
+                val remaining = (duration - elapsed).coerceAtLeast(1L)
+                touch.handler.postDelayed(task, minOf(16L, remaining))
+            }
+        }
+        swipePointerIds[b.id] = pointer
+        swipeActions[b.id] = task
+        touch.down(pointer, start.x, start.y)
+        if (!touch.isDown(pointer)) {
+            swipeActions.remove(b.id)
+            swipePointerIds.remove(b.id)
+            if (buttonPointerIds[b.id] == pointer) buttonPointerIds.remove(b.id)
+            return
+        }
+        touch.handler.postDelayed(task, minOf(16L, duration))
+    }
+
+    private fun finishSwipe(controlId: Int) {
+        swipeActions.remove(controlId)?.let { touch.handler.removeCallbacks(it) }
+        val pointer = swipePointerIds.remove(controlId) ?: return
+        touch.up(pointer)
+        if (buttonPointerIds[controlId] == pointer) buttonPointerIds.remove(controlId)
     }
 
     /** Agenda uma ação cancelável e a remove do registro quando termina. Chamado no handler. */
@@ -603,77 +934,114 @@ class MappingEngine(
         scheduleAction(90) { tap(b) }
     }
 
-    private fun press(b: HudButton) {
-        val p = pointerId(b) ?: return
-        if (touch.isDown(p)) return
-        val a = area()
-        val point = CoordinateTransformer.normalizedToPixels(a, b.x, b.y)
-        touch.down(p, point.x, point.y)
-    }
-
-    private fun release(b: HudButton) {
-        val p = buttonPointerIds.remove(b.id) ?: return
-        touch.up(p)
-    }
-
-    /** Toque curto: desce e solta sozinho. */
-    private fun tap(b: HudButton) {
-        val p = pointerId(b) ?: return
-        if (touch.isDown(p)) return
-        val a = area()
-        val point = CoordinateTransformer.normalizedToPixels(a, b.x, b.y)
-        touch.down(p, point.x, point.y)
-        scheduleAction(25) {
-            touch.up(p)
-            if (buttonPointerIds[b.id] == p) buttonPointerIds.remove(b.id)
+    /** Adquire o contato para uma origem; apenas o primeiro owner envia ACTION_DOWN. */
+    private fun pressOwned(b: HudButton, source: PressSource): Boolean {
+        val result = pressOwnership.acquire(b.id, source)
+        if (!result.accepted) return pressOwnership.contains(b.id, source) &&
+            (buttonPointerIds[b.id]?.let { touch.isDown(it) && !touch.isReleasePending(it) } == true)
+        if (!result.firstOwner) {
+            val existing = buttonPointerIds[b.id]
+            return existing != null && touch.isDown(existing) && !touch.isReleasePending(existing)
         }
+        val p = pointerId(b)
+        if (p == null || touch.isReleasePending(p)) {
+            pressOwnership.release(b.id, source)
+            return false
+        }
+        if (!touch.isDown(p)) {
+            val bounds = area()
+            val point = CoordinateTransformer.normalizedToPixels(bounds, b.x, b.y)
+            touch.down(p, point.x, point.y)
+        }
+        if (!touch.isDown(p) || touch.isReleasePending(p)) {
+            pressOwnership.release(b.id, source)
+            return false
+        }
+        return true
+    }
+
+    /** Remove uma origem; ACTION_UP só é enviado quando o último owner sair. */
+    private fun releaseOwned(b: HudButton, source: PressSource) {
+        if (!pressOwnership.release(b.id, source)) return
+        val p = buttonPointerIds[b.id] ?: return
+        touch.up(p)
+        // Se o backend recusou UP, conserva o ID até o TouchInjector confirmar a liberação.
+        if (!touch.isDown(p) && !touch.isReleasePending(p)) buttonPointerIds.remove(b.id)
+    }
+
+    /** Toque curto com owner transitório, compatível com um Hold simultâneo no mesmo controle. */
+    private fun tap(b: HudButton) {
+        val source = PressSource(PressSourceKind.TRANSIENT_TAP, ++transientPressSequence)
+        if (!pressOwned(b, source)) return
+        scheduleAction(25) { releaseOwned(b, source) }
     }
 
     /** MIRA: segurar, ou suspender (toggle): um toque ativa e mantém, o próximo desativa. */
-    private fun aimKey(b: HudButton, s: AppSettings, down: Boolean) {
+    private fun aimKey(
+        b: HudButton,
+        s: AppSettings,
+        down: Boolean,
+        source: PressSource = PressSource(PressSourceKind.AIM_KEY, b.id.toLong())
+    ) {
         if (b.aimToggle) {
-            if (!down) return                  // soltar a tecla não desativa
+            if (!down) return                  // soltar a tecla não desativa o toggle
             tap(b)
-            val on = aimId != b.id
-            aimId = if (on) b.id else -1
-            fireWithAim(b, s, on)
-        } else {
-            if (down) {
-                press(b)
-                aimId = b.id
-            } else {
-                release(b)
-                if (aimId == b.id) aimId = -1
+            val on = aimActivations.toggle(b.id, source)
+            aimId = aimActivations.activeAimId()
+            fireWithAim(b, s, on, source)
+        } else if (down) {
+            if (pressOwned(b, source)) {
+                aimActivations.activate(b.id, source)
+                aimId = aimActivations.activeAimId()
+                fireWithAim(b, s, true, source)
             }
-            fireWithAim(b, s, down)
+        } else {
+            releaseOwned(b, source)
+            aimActivations.deactivate(b.id, source)
+            aimId = aimActivations.activeAimId()
+            fireWithAim(b, s, false, source)
         }
     }
 
-    /** "Atirar com a tecla de mira": a mira também aciona os botões ligados à tecla de tiro. */
-    private fun fireWithAim(ab: HudButton, s: AppSettings, down: Boolean) {
-        if (!ab.fireWithAim) return
+    /**
+     * "Atirar com a tecla de mira": somente Fire vinculados à shootKey são acionados.
+     * Cada mira é um owner distinto, portanto soltar uma mira não libera um Fire que ainda
+     * esteja pressionado fisicamente ou por outra mira.
+     */
+    private fun fireWithAim(ab: HudButton, s: AppSettings, down: Boolean, aimSource: PressSource) {
+        if (!ab.fireWithAim || ab.shootKey == 0) return
+        val source = derivedSource(PressSourceKind.AIM_FIRE, aimSource)
         for (f in s.buttons) {
-            if (f.id == ab.id || f.kind == Kind.AIM || f.key != ab.shootKey) continue
+            if (f.id == ab.id || f.kind != Kind.FIRE || f.key != ab.shootKey) continue
             if (f.mode == Mode.TAP) {
                 if (down) tap(f)
             } else if (down) {
-                press(f)
+                pressOwned(f, source)
             } else {
-                release(f)
+                releaseOwned(f, source)
             }
         }
     }
 
-    /** "Mirar ao atirar": o tiro também segura o botão de mira escolhido. */
-    private fun linkAim(b: HudButton, s: AppSettings, down: Boolean) {
+    /** "Mirar ao atirar": cada Fire mantém sua própria propriedade da mira vinculada. */
+    private fun linkAim(
+        b: HudButton,
+        s: AppSettings,
+        down: Boolean,
+        fireSource: PressSource = PressSource(PressSourceKind.DIRECT, b.id.toLong())
+    ) {
         if (b.linkAimId < 0) return
         val a = s.buttons.firstOrNull { it.id == b.linkAimId && it.kind == Kind.AIM } ?: return
+        val source = derivedSource(PressSourceKind.FIRE_LINK_AIM, fireSource)
         if (down) {
-            press(a)
-            aimId = a.id
+            if (pressOwned(a, source)) {
+                aimActivations.activate(a.id, source)
+                aimId = aimActivations.activeAimId()
+            }
         } else {
-            release(a)
-            if (aimId == a.id) aimId = -1
+            releaseOwned(a, source)
+            aimActivations.deactivate(a.id, source)
+            aimId = aimActivations.activeAimId()
         }
     }
 

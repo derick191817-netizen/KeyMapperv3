@@ -10,6 +10,7 @@ import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import com.example.keymapper.domain.SettingsRecoveryPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
@@ -87,7 +88,7 @@ class SettingsRepository(context: Context) {
             // wrong type for a collection. Without sanitizing it, a later save could silently
             // replace all saved profiles with an empty map.
             val rawProfiles = root.opt("profiles")
-            if (root.has("profiles") && rawProfiles != JSONObject.NULL && rawProfiles !is JSONObject) {
+            if (SettingsRecoveryPolicy.shouldBackupInvalidProfiles(root.has("profiles"), rawProfiles is JSONObject)) {
                 prefs[recoveryBackupKey] = raw.take(MAX_BACKUP_CHARS)
                 root.remove("profiles")
                 modified = true
@@ -115,7 +116,10 @@ class SettingsRepository(context: Context) {
 
             listOf("buttons", "games").forEach { field ->
                 val value = root.opt(field)
-                if (root.has(field) && value != JSONObject.NULL && value !is JSONArray) {
+                if (SettingsRecoveryPolicy.shouldBackupInvalidArray(root.has(field), value is JSONArray)) {
+                    // JSON null is not a valid collection. Back up the original before AppSettings
+                    // falls back to defaults, otherwise a later save could erase the user's layout
+                    // or app list without leaving a recovery copy.
                     prefs[recoveryBackupKey] = raw.take(MAX_BACKUP_CHARS)
                     root.remove(field)
                     modified = true

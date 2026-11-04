@@ -1,0 +1,33 @@
+KeyMapper 0.14.59 — resultados de validação
+versionName=0.14.59
+versionCode=75
+artifact=keymapper-0.14.59-debug
+
+PASS — native-tests/run.sh: recuperação de lote JNI e classificação HID.
+PASS — macro pad de 1 tecla detectado como teclado.
+PASS — teclado de 3 teclas detectado como teclado.
+PASS — BTN_LEFT/BTN_GAMEPAD sem teclas não classificado como teclado.
+PASS — HID misto reconhece KEY_ENTER e filtra BTN_SOUTH do caminho de teclado.
+PASS — bitmap vazio, ponteiro nulo e wordCount=0 são tratados com segurança.
+PASS — native-tests/check-syntax.sh: sintaxe C++17/JNI de evdev_capture.cpp e uinput_touch.cpp.
+PASS — native-tests/check-library-contract.sh: CMake, System.loadLibrary e nome da biblioteca coerentes.
+PASS — dependency-tests/check-kadb-coordinates.sh.
+PASS — dependency-tests/check-jetifier-ignorelist.sh.
+PASS — dependency-tests/test-kadb-selected-version.sh.
+PASS — architecture-tests/check-wireless-adb-boundary.sh.
+PASS — architecture-tests/check-shizuku-session-isolation.sh.
+PASS — architecture-tests/check-session-start-idempotency.sh.
+PASS — architecture-tests/check-hud-placement-policy.sh.
+PASS — architecture-tests/check-overlay-window-placement.sh.
+PASS — architecture-tests/check-visible-control-types.sh.
+PASS — build-tests/check-toolchain-compatibility.py.
+PASS — build-tests/test-toolchain-compatibility.py (casos negativos).
+PASS — parse do YAML do GitHub Actions e coerência do artefato keymapper-0.14.59-debug.
+
+NOT RUN — :app:lintDebug (Gradle Wrapper 8.8 não pôde ser baixado por falha DNS de services.gradle.org neste ambiente).
+NOT RUN — :app:testDebugUnitTest (Gradle Wrapper indisponível neste ambiente).
+NOT RUN — :app:assembleDebug (Gradle Wrapper indisponível; nenhum APK foi gerado).
+NOT RUN — instalação/teste em Android 13, One UI e Samsung DeX.
+NOT PUBLISHED — criação de branch no GitHub recusada com HTTP 403 Resource not accessible by integration.
+
+Conclusão: as verificações host, nativas, de dependências, arquitetura e toolchain passaram. A validação Gradle/Android/CI e o teste físico permanecem pendentes; esta entrega contém código-fonte e patch, não APK.

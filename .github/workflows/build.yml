@@ -52,10 +52,20 @@ jobs:
           bash ./tools/native-tests/check-syntax.sh
           bash ./tools/native-tests/check-library-contract.sh
           bash ./tools/dependency-tests/check-kadb-coordinates.sh
+          bash ./tools/dependency-tests/check-jetifier-ignorelist.sh
+          bash ./tools/dependency-tests/test-kadb-selected-version.sh
           bash ./tools/architecture-tests/check-wireless-adb-boundary.sh
           bash ./tools/architecture-tests/check-shizuku-session-isolation.sh
+          bash ./tools/architecture-tests/check-session-start-idempotency.sh
           bash ./tools/architecture-tests/check-hud-placement-policy.sh
           bash ./tools/architecture-tests/check-overlay-window-placement.sh
+          bash ./tools/architecture-tests/check-visible-control-types.sh
+          bash ./tools/architecture-tests/check-macro-sequence-contract.sh
+          bash ./tools/architecture-tests/check-control-activation-ownership.sh
+          bash ./tools/architecture-tests/check-settings-profile-recovery.sh
+
+      - name: Confirmar versão Kadb Android resolvida
+        run: bash ./tools/dependency-tests/verify-kadb-selected-version.sh
 
       - name: Executar análise estática Android (Lint)
         run: ./gradlew --no-daemon :app:lintDebug --stacktrace --console=plain
@@ -69,7 +79,7 @@ jobs:
       - name: Publicar APK Debug
         uses: actions/upload-artifact@v4
         with:
-          name: keymapper-0.14.55-debug
+          name: keymapper-0.14.65-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

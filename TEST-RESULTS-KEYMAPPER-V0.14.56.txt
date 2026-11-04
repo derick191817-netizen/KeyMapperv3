@@ -1,0 +1,29 @@
+KeyMapper 0.14.56 — resultados de validação
+
+PASS
+- check-kadb-coordinates.sh: coordenada Android 2.1.4 + mDNS Android 2.1.3.
+- check-jetifier-ignorelist.sh: ignorelist Bouncy Castle aplicada sem desativar Jetifier.
+- test-kadb-selected-version.sh: fake Gradle positivo e três cenários negativos (Kadb 2.1.5, BC 1.84, dependência ausente).
+- check-toolchain-compatibility.py: AGP 8.5.2, Kotlin/Compose 2.4.21, Gradle 8.8, JDK/JVM 17, SDK 34, NDK e CMake.
+- test-toolchain-compatibility.py: quatro cenários negativos.
+- native-tests/run.sh: testes host evdev/JNI.
+- native-tests/check-syntax.sh: sintaxe C++17.
+- native-tests/check-library-contract.sh: contrato CMake/JNI/biblioteca.
+- architecture-tests/check-wireless-adb-boundary.sh.
+- architecture-tests/check-shizuku-session-isolation.sh.
+- architecture-tests/check-hud-placement-policy.sh.
+- architecture-tests/check-overlay-window-placement.sh.
+- YAML e consistência de versão/artefato.
+- ZIP testado com unzip -t e SHA-256 conferido.
+
+TENTATIVA DE VALIDAÇÃO GRADLE NESTE AMBIENTE
+- `./gradlew :app:dependencyInsight ...` foi executado, mas o Wrapper precisou baixar Gradle 8.8 e falhou antes de iniciar com `UnknownHostException: services.gradle.org`.
+- Java 21 está disponível no ambiente, mas não há distribuição Gradle 8.8 no cache local.
+
+PENDENTE NO GITHUB ACTIONS
+- verify-kadb-selected-version.sh: requer resolução real do Gradle/Maven; o contrato foi testado com Gradle simulado, mas a seleção real ainda depende do runner GitHub.
+- :app:lintDebug.
+- :app:testDebugUnitTest.
+- :app:assembleDebug.
+
+Não houve APK gerado nem teste físico no dispositivo nesta sessão.

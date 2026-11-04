@@ -27,6 +27,9 @@ import android.widget.TextView
 import com.example.keymapper.data.HudButton
 import com.example.keymapper.data.Kind
 import com.example.keymapper.data.Mode
+import com.example.keymapper.data.MacroAction
+import com.example.keymapper.data.MacroStep
+import com.example.keymapper.data.MacroStepPolicy
 import com.example.keymapper.data.Rot
 import com.example.keymapper.data.displayName
 import com.example.keymapper.data.keyLabel
@@ -591,7 +594,17 @@ class ConfigPanelView(
 
     private fun setKind(kind: Int) {
         mod { b ->
-            b.copy(kind = kind, macro = if (kind == Kind.STANDARD) b.macro else emptyList())
+            val safeMode = when (kind) {
+                Kind.FIRE -> if (b.mode == Mode.TAP) Mode.TAP else Mode.HOLD
+                else -> if (kind == Kind.STANDARD) b.mode else Mode.HOLD
+            }
+            b.copy(
+                kind = kind,
+                mode = safeMode,
+                macro = if (kind == Kind.STANDARD) b.macro else emptyList(),
+                isCombo = kind == Kind.STANDARD && b.isCombo,
+                sequence = if (kind == Kind.MACRO) b.sequence else emptyList()
+            )
         }
         build()
     }
@@ -602,6 +615,7 @@ class ConfigPanelView(
             s.copy(buttons = s.buttons.filter { it.id != buttonId }
                 .map { it.copy(
                     macro = it.macro.filter { m -> m != buttonId },
+                    sequence = it.sequence.filter { step -> step.action == MacroAction.WAIT || step.targetId != buttonId },
                     linkAimId = if (it.linkAimId == buttonId) -1 else it.linkAimId
                 ) })
         )
@@ -618,6 +632,12 @@ class ConfigPanelView(
         numericFieldCommits.clear()
         root.removeAllViews()
         val b = host.settings().buttons.firstOrNull { it.id == buttonId }
+        if (b != null && b.kind == Kind.STANDARD &&
+            (b.isCombo || b.name.equals("Rapid Tap", true))
+        ) {
+            advancedOpen = true
+        }
+        if (b?.kind == Kind.MACRO) advancedOpen = true
         if (b == null) {
             completed = true
             onDone(true)
@@ -628,6 +648,8 @@ class ConfigPanelView(
         when (b.kind) {
             Kind.AIM -> buildAim(b)
             Kind.FIRE -> buildFire(b)
+            Kind.SWIPE -> buildSwipe(b)
+            Kind.MACRO -> buildMacro(b)
             else -> buildStandard(b)
         }
     }
@@ -643,24 +665,67 @@ class ConfigPanelView(
 
     private fun buildStandard(b: HudButton) {
         val s = host.settings()
-        add(label("Botão padrão  •  ${keyLabel(b.key)}", 16f, Color.WHITE, true))
+        add(label("${b.displayName()}  •  ${keyLabel(b.key)}", 16f, Color.WHITE, true))
         typeRow(b)
         keyBlock(b, 1, "Tecla (mapeamento)", "Pressione uma tecla física ou clique em um botão do mouse; também há opções explícitas abaixo.")
 
-        add(option("Modo de toque", modeHelp(b.mode)))
-        add(row(
-            btn("Toque simples", b.mode == Mode.TAP) { mod { it.copy(mode = Mode.TAP) }; build() },
-            btn("Segurar", b.mode == Mode.HOLD) { mod { it.copy(mode = Mode.HOLD) }; build() }
-        ))
-        add(row(
-            btn("Alternar (toggle)", b.mode == Mode.TOGGLE) { mod { it.copy(mode = Mode.TOGGLE) }; build() },
-            btn("Duplo toque", b.mode == Mode.DOUBLE) { mod { it.copy(mode = Mode.DOUBLE) }; build() }
-        ))
+        if (!b.isCombo && b.macro.isEmpty()) {
+            add(option("Modo de toque", modeHelp(b.mode)))
+            add(row(
+                btn("Toque simples", b.mode == Mode.TAP) {
+                    mod { it.copy(mode = Mode.TAP, name = if (it.name.equals("Rapid Tap", true)) "Tap" else it.name) }
+                    build()
+                },
+                btn("Segurar", b.mode == Mode.HOLD) {
+                    mod { it.copy(mode = Mode.HOLD, name = if (it.name.equals("Rapid Tap", true)) "Hold" else it.name) }
+                    build()
+                }
+            ))
+            add(row(
+                btn("Alternar (toggle)", b.mode == Mode.TOGGLE) {
+                    mod { it.copy(mode = Mode.TOGGLE, name = if (it.name.equals("Rapid Tap", true)) "Hold" else it.name) }
+                    build()
+                },
+                btn("Duplo toque", b.mode == Mode.DOUBLE) {
+                    mod { it.copy(mode = Mode.DOUBLE, name = if (it.name.equals("Rapid Tap", true)) "Hold" else it.name) }
+                    build()
+                }
+            ))
+        } else {
+            add(option("Combo simultâneo", "Este controle aciona apenas os destinos selecionados. Não executa um toque no próprio marcador."))
+        }
         add(slider(
             "Tempo de resposta (ms)", "Atraso entre apertar a tecla e o toque acontecer. 0 = imediato. De 0 a 500 ms.",
             b.delayMs.toFloat(), 0f, 500f, 5f, 0f, 500f, "%.0f"
         ) { v -> mod { it.copy(delayMs = v.roundToInt()) } })
-        add(label("Não há repetição automática (rapid fire): um aperto nunca vira vários toques.", 11f, dim))
+        if (advancedOpen && !b.isCombo && b.macro.isEmpty()) {
+            add(divider())
+            add(option("Rapid Tap", "Repete toques somente enquanto a entrada física estiver pressionada. A soltura cancela imediatamente; Fire não usa essa repetição."))
+            add(btn(if (b.mode == Mode.RAPID) "Desativar Rapid Tap" else "Ativar Rapid Tap", b.mode == Mode.RAPID) {
+                mod { current ->
+                    if (current.mode == Mode.RAPID) {
+                        current.copy(
+                            mode = Mode.HOLD,
+                            name = if (current.name.equals("Rapid Tap", true)) "Hold" else current.name
+                        )
+                    } else {
+                        current.copy(
+                            mode = Mode.RAPID,
+                            macro = emptyList(),
+                            isCombo = false,
+                            name = if (current.name.equals("Tap", true) || current.name.equals("Hold", true)) "Rapid Tap" else current.name
+                        )
+                    }
+                }
+                build()
+            })
+            if (b.mode == Mode.RAPID) {
+                add(slider(
+                    "Intervalo de repetição (ms)", "Tempo entre toques; valores menores aumentam a frequência. Mínimo de 40 ms para permitir a liberação de cada toque.",
+                    b.rapidIntervalMs.toFloat(), 40f, 2_000f, 10f, 40f, 2_000f, "%.0f"
+                ) { v -> mod { it.copy(rapidIntervalMs = v.roundToInt()) } })
+            }
+        }
 
         // Propriedades comuns não ficam escondidas em "Mais opções": cada botão tem nome,
         // tamanho, opacidade e posição editáveis logo na primeira abertura do painel.
@@ -668,19 +733,44 @@ class ConfigPanelView(
         add(btn("Apagar botão", false, red) { deleteButton() })
         moreButton()
         if (advancedOpen) {
-            val others = s.buttons.filter { it.id != b.id }
-            if (others.isNotEmpty()) {
-                add(option("Macro (opcional)", "Escolha botões para acionar juntos. Com macro, este botão aciona só os escolhidos, não o próprio ponto."))
-                val chips = ArrayList<View>()
-                for (o in others) {
-                    chips.add(btn(o.displayName() + " (" + keyLabel(o.key) + ")", b.macro.contains(o.id)) {
-                        mod { cur ->
-                            cur.copy(macro = if (cur.macro.contains(o.id)) cur.macro - o.id else cur.macro + o.id)
+            add(divider())
+            add(option("Combo simultâneo", "Aciona vários controles no mesmo pressionamento. É diferente de uma macro sequencial; o Combo vazio não produz toque."))
+            add(btn(if (b.isCombo || b.macro.isNotEmpty()) "Desativar Combo" else "Ativar Combo", b.isCombo || b.macro.isNotEmpty()) {
+                mod { cur ->
+                    val enable = !(cur.isCombo || cur.macro.isNotEmpty())
+                    cur.copy(
+                        isCombo = enable,
+                        macro = if (enable) cur.macro else emptyList(),
+                        mode = Mode.HOLD,
+                        name = when {
+                            enable && (cur.name.equals("Tap", true) || cur.name.equals("Hold", true) || cur.name.equals("Rapid Tap", true) || cur.name.isBlank()) -> "Combo"
+                            !enable && cur.name.equals("Combo", true) -> "Hold"
+                            else -> cur.name
                         }
-                        build()
-                    })
+                    )
                 }
-                for (chunk in chips.chunked(2)) add(row(*chunk.toTypedArray()))
+                build()
+            })
+            if (b.isCombo || b.macro.isNotEmpty()) {
+                val others = s.buttons.filter { MappingEditorPolicy.isComboTargetEligible(b.id, it) }
+                if (others.isEmpty()) {
+                    add(label("Adicione outro controle ao perfil para selecioná-lo como destino do Combo.", 11f, dim))
+                } else {
+                    val chips = ArrayList<View>()
+                    for (o in others) {
+                        chips.add(btn(o.displayName() + " (" + keyLabel(o.key) + ")", b.macro.contains(o.id)) {
+                            mod { cur ->
+                                cur.copy(
+                                    macro = if (cur.macro.contains(o.id)) cur.macro - o.id else cur.macro + o.id,
+                                    isCombo = true,
+                                    mode = Mode.HOLD
+                                )
+                            }
+                            build()
+                        })
+                    }
+                    for (chunk in chips.chunked(2)) add(row(*chunk.toTypedArray()))
+                }
             }
         }
     }
@@ -689,7 +779,7 @@ class ConfigPanelView(
 
     private fun buildFire(b: HudButton) {
         val s = host.settings()
-        add(label("Botão de tiro  •  ${keyLabel(b.key)}", 16f, Color.WHITE, true))
+        add(label("Fire · Disparo  •  ${keyLabel(b.key)}", 16f, Color.WHITE, true))
         typeRow(b)
         keyBlock(b, 1, "Tecla de tiro", "Tecla ou botão do mouse para acionar o disparo; escolha o mouse nos botões abaixo.")
 
@@ -721,6 +811,136 @@ class ConfigPanelView(
                 for (chunk in opts.chunked(3)) add(row(*chunk.toTypedArray()))
             }
         }
+    }
+
+    // ===== SWIPE =====
+
+    private fun buildSwipe(b: HudButton) {
+        add(label("Swipe / Arrastar  •  ${keyLabel(b.key)}", 16f, Color.WHITE, true))
+        typeRow(b)
+        add(option("Gesto de arraste", "Ao pressionar a entrada, o toque começa na posição X/Y do controle, percorre a trajetória e termina no destino configurado. Soltar antes do fim cancela o gesto e libera o ponteiro."))
+        keyBlock(b, 1, "Tecla ou botão de ativação", "Associe uma tecla ou um botão físico do mouse.")
+        add(divider())
+        add(sectionTitle("1 · DESTINO"))
+        add(slider(
+            "Destino X (%)", "0 = borda esquerda; 100 = direita.",
+            b.swipeEndX * 100f, 0f, 100f, 1f, 0f, 100f, "%.0f"
+        ) { v -> mod { it.copy(swipeEndX = v / 100f) } })
+        add(slider(
+            "Destino Y (%)", "0 = topo; 100 = base.",
+            b.swipeEndY * 100f, 0f, 100f, 1f, 0f, 100f, "%.0f"
+        ) { v -> mod { it.copy(swipeEndY = v / 100f) } })
+        add(slider(
+            "Duração (ms)", "Duração total do arraste. A soltura da tecla cancela e encerra o toque imediatamente.",
+            b.swipeDurationMs.toFloat(), 50f, 2_000f, 10f, 50f, 2_000f, "%.0f"
+        ) { v -> mod { it.copy(swipeDurationMs = v.roundToInt()) } })
+        add(divider())
+        add(sectionTitle("2 · ORIGEM"))
+        add(label("A origem é a posição X/Y do marcador do Swipe. Arraste o marcador no HUD ou ajuste as posições na seção de aparência.", 11f, dim))
+        appearance(b)
+        add(btn("Apagar Swipe", false, red) { deleteButton() })
+    }
+
+    // ===== MACRO SEQUENCIAL =====
+
+    private fun buildMacro(b: HudButton) {
+        val settings = host.settings()
+        add(label("Macro sequencial  •  ${keyLabel(b.key)}", 16f, Color.WHITE, true))
+        typeRow(b)
+        keyBlock(b, 1, "Atalho de execução", "Segure a tecla ou o botão do mouse para executar a sequência. Soltar cancela a etapa atual e libera o toque.")
+        add(option(
+            "Execução em sequência",
+            "As etapas são executadas uma por vez: pausa, toque, pressionamento temporário ou arraste. Não é o Combo simultâneo."
+        ))
+        add(slider(
+            "Repetições da sequência", "Quantidade de execuções completas enquanto o atalho permanecer pressionado. Limitado a 20 ciclos.",
+            b.sequenceRepeatCount.toFloat(), 1f, MacroStepPolicy.MAX_REPEATS.toFloat(), 1f,
+            1f, MacroStepPolicy.MAX_REPEATS.toFloat(), "%.0f"
+        ) { value -> mod { it.copy(sequenceRepeatCount = MacroStepPolicy.repeatCount(value.roundToInt())) } })
+
+        add(divider())
+        add(sectionTitle("ETAPAS · ${b.sequence.size}/${MacroStepPolicy.MAX_STEPS}"))
+        if (b.sequence.isEmpty()) {
+            add(label("Nenhuma etapa configurada. Adicione uma pausa ou escolha um controle existente como destino.", 11f, dim))
+        }
+        b.sequence.take(MacroStepPolicy.MAX_STEPS).forEachIndexed { index, step ->
+            val target = settings.buttons.firstOrNull { it.id == step.targetId }
+            val summary = when (step.action) {
+                MacroAction.WAIT -> "${index + 1}. Pausa · ${step.durationMs} ms"
+                MacroAction.TAP -> "${index + 1}. Toque · ${target?.displayName() ?: "Destino ausente"} · 25 ms"
+                MacroAction.HOLD -> "${index + 1}. Segurar · ${target?.displayName() ?: "Destino ausente"} · ${step.durationMs} ms"
+                MacroAction.SWIPE -> "${index + 1}. Arrastar · ${target?.displayName() ?: "Destino ausente"} · ${step.durationMs} ms"
+                else -> "${index + 1}. Etapa inválida"
+            }
+            add(option(summary, "Etapas em ordem. O Macro usa o ponto salvo do controle de destino; Swipe usa também o destino X/Y dele."))
+            if (step.action == MacroAction.WAIT || step.action == MacroAction.HOLD || step.action == MacroAction.SWIPE) {
+                val minDuration = if (step.action == MacroAction.SWIPE) 50 else MacroStepPolicy.MIN_DURATION_MS
+                val maxDuration = if (step.action == MacroAction.SWIPE) 2_000 else MacroStepPolicy.MAX_DURATION_MS
+                add(slider(
+                    "Duração da etapa ${index + 1} (ms)", "Tempo da pausa, do pressionamento ou do arraste.",
+                    step.durationMs.toFloat(), minDuration.toFloat(), maxDuration.toFloat(),
+                    10f, minDuration.toFloat(), maxDuration.toFloat(), "%.0f"
+                ) { value ->
+                    mod { current ->
+                        current.copy(sequence = current.sequence.mapIndexed { i, item ->
+                            if (i == index) item.copy(durationMs = MacroStepPolicy.durationMs(item.action, value.roundToInt())) else item
+                        })
+                    }
+                })
+            }
+            add(btn("Remover etapa ${index + 1}", false, red) {
+                mod { current -> current.copy(sequence = current.sequence.filterIndexed { i, _ -> i != index }) }
+                build()
+            })
+            add(divider())
+        }
+
+        val canAdd = b.sequence.size < MacroStepPolicy.MAX_STEPS
+        add(sectionTitle("ADICIONAR ETAPA"))
+        add(row(btn("Pausa", false) {
+            if (canAdd) {
+                mod { it.copy(sequence = (it.sequence + MacroStep(MacroAction.WAIT, -1, 250)).take(MacroStepPolicy.MAX_STEPS)) }
+                build()
+            }
+        }))
+        val tapTargets = settings.buttons.filter { MappingEditorPolicy.isMacroTargetEligible(b.id, MacroAction.TAP, it) }
+        val holdTargets = settings.buttons.filter { MappingEditorPolicy.isMacroTargetEligible(b.id, MacroAction.HOLD, it) }
+        val swipeTargets = settings.buttons.filter { MappingEditorPolicy.isMacroTargetEligible(b.id, MacroAction.SWIPE, it) }
+        add(label("Toque · escolha um controle Tap/Hold ou Fire", 11f, dim))
+        addMacroTargetButtons(b, MacroAction.TAP, tapTargets, canAdd)
+        add(label("Segurar · escolha um controle Tap/Hold ou Fire", 11f, dim))
+        addMacroTargetButtons(b, MacroAction.HOLD, holdTargets, canAdd)
+        add(label("Arrastar · escolha um controle Swipe", 11f, dim))
+        addMacroTargetButtons(b, MacroAction.SWIPE, swipeTargets, canAdd)
+        if (!canAdd) add(label("Limite de ${MacroStepPolicy.MAX_STEPS} etapas atingido.", 11f, dim))
+
+        add(option(
+            "Cancelamento e segurança",
+            "Soltar o atalho, pausar o KeyMapper, perder a sessão ou liberar todas as entradas cancela a macro e envia UP para qualquer toque ainda pressionado."
+        ))
+        appearance(b)
+        add(btn("Apagar Macro", false, red) { deleteButton() })
+    }
+
+    private fun addMacroTargetButtons(owner: HudButton, action: Int, targets: List<HudButton>, enabled: Boolean) {
+        if (targets.isEmpty()) {
+            add(label("Nenhum destino compatível cadastrado. Adicione primeiro um controle apropriado.", 11f, dim))
+            return
+        }
+        val buttons = targets.take(48).map { target ->
+            btn("${target.displayName()} · ${keyLabel(target.key)}", false) {
+                if (enabled) {
+                    val duration = if (action == MacroAction.TAP) 25 else 250
+                    mod { current ->
+                        current.copy(sequence = (current.sequence + MacroStep(action, target.id, duration))
+                            .take(MacroStepPolicy.MAX_STEPS))
+                    }
+                    build()
+                }
+            }.apply { isEnabled = enabled }
+        }
+        buttons.chunked(2).forEach { group -> add(row(*group.toTypedArray())) }
+        if (targets.size > 48) add(label("Mais ${targets.size - 48} destinos não exibidos; use a lista de controles para reduzir duplicatas.", 10f, dim))
     }
 
     // ===== MIRA =====
@@ -954,11 +1174,15 @@ class ConfigPanelView(
     }
 
     private fun typeRow(b: HudButton) {
-        add(option("Tipo do botão", "Padrão: simula uma tecla. Tiro: segurar contínuo. Mira: sensibilidade própria, suspender e deadzone. Toque em Mira para ver as opções da mira."))
+        add(option("Tipo do controle", "Tap/Hold/Combo usam controles padrão; Fire dispara; Aim/Sight controla a câmera; Swipe arrasta; Macro executa uma sequência temporizada."))
         add(row(
             btn("Padrão", b.kind == Kind.STANDARD) { setKind(Kind.STANDARD) },
-            btn("Tiro", b.kind == Kind.FIRE) { setKind(Kind.FIRE) },
-            btn("Mira", b.kind == Kind.AIM) { setKind(Kind.AIM) }
+            btn("Fire", b.kind == Kind.FIRE) { setKind(Kind.FIRE) },
+            btn("Aim/Sight", b.kind == Kind.AIM) { setKind(Kind.AIM) }
+        ))
+        add(row(
+            btn("Swipe", b.kind == Kind.SWIPE) { setKind(Kind.SWIPE) },
+            btn("Macro", b.kind == Kind.MACRO) { setKind(Kind.MACRO) }
         ))
     }
 
@@ -966,6 +1190,7 @@ class ConfigPanelView(
         Mode.TAP -> "Toque simples: um toque curto por aperto da tecla."
         Mode.TOGGLE -> "Alternar: aperte uma vez para ligar e outra para desligar (ex.: agachar)."
         Mode.DOUBLE -> "Duplo toque: um aperto envia dois toques curtos seguidos."
+        Mode.RAPID -> "Rapid Tap: repete toques enquanto a entrada física permanece pressionada."
         else -> "Segurar: o toque desce ao apertar e sobe só quando você solta a tecla."
     }
 

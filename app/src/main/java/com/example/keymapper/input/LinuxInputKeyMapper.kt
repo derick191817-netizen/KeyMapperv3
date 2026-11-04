@@ -30,6 +30,18 @@ object LinuxInputKeyMapper {
             53 to KeyEvent.KEYCODE_SLASH, 54 to KeyEvent.KEYCODE_SHIFT_RIGHT,
             55 to KeyEvent.KEYCODE_NUMPAD_MULTIPLY, 56 to KeyEvent.KEYCODE_ALT_LEFT,
             57 to KeyEvent.KEYCODE_SPACE, 58 to KeyEvent.KEYCODE_CAPS_LOCK,
+            // Consumer/media keys are valid EV_KEY codes even though Linux assigns them
+            // numeric values above BTN_MISC. Keep them useful after native classification.
+            113 to KeyEvent.KEYCODE_VOLUME_MUTE,
+            119 to KeyEvent.KEYCODE_MEDIA_PAUSE,
+            160 to KeyEvent.KEYCODE_MEDIA_CLOSE,
+            161 to KeyEvent.KEYCODE_MEDIA_EJECT,
+            163 to KeyEvent.KEYCODE_MEDIA_NEXT,
+            164 to KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            165 to KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            166 to KeyEvent.KEYCODE_MEDIA_STOP,
+            167 to KeyEvent.KEYCODE_MEDIA_RECORD,
+            168 to KeyEvent.KEYCODE_MEDIA_REWIND,
             59 to KeyEvent.KEYCODE_F1, 60 to KeyEvent.KEYCODE_F2, 61 to KeyEvent.KEYCODE_F3,
             62 to KeyEvent.KEYCODE_F4, 63 to KeyEvent.KEYCODE_F5, 64 to KeyEvent.KEYCODE_F6,
             65 to KeyEvent.KEYCODE_F7, 66 to KeyEvent.KEYCODE_F8, 67 to KeyEvent.KEYCODE_F9,
@@ -50,7 +62,19 @@ object LinuxInputKeyMapper {
             111 to KeyEvent.KEYCODE_FORWARD_DEL, 114 to KeyEvent.KEYCODE_VOLUME_DOWN,
             115 to KeyEvent.KEYCODE_VOLUME_UP, 125 to KeyEvent.KEYCODE_META_LEFT,
             126 to KeyEvent.KEYCODE_META_RIGHT, 139 to KeyEvent.KEYCODE_MENU,
-            158 to KeyEvent.KEYCODE_BACK
+            158 to KeyEvent.KEYCODE_BACK,
+            174 to KeyEvent.KEYCODE_ESCAPE,
+            200 to KeyEvent.KEYCODE_MEDIA_PLAY,
+            201 to KeyEvent.KEYCODE_MEDIA_PAUSE,
+            208 to KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+            352 to KeyEvent.KEYCODE_DPAD_CENTER, // KEY_OK
+            353 to KeyEvent.KEYCODE_DPAD_CENTER, // KEY_SELECT
+            358 to KeyEvent.KEYCODE_INFO,
+            365 to KeyEvent.KEYCODE_GUIDE,
+            402 to KeyEvent.KEYCODE_CHANNEL_UP,
+            403 to KeyEvent.KEYCODE_CHANNEL_DOWN,
+            407 to KeyEvent.KEYCODE_MEDIA_NEXT, // KEY_NEXT
+            412 to KeyEvent.KEYCODE_MEDIA_PREVIOUS // KEY_PREVIOUS
         ))
     }
 

@@ -116,7 +116,18 @@ object ShizukuInputCaptureBridge : VirtualTouchOutput {
             onState = state
             onTouchOutputState = touchOutputState
             requestedEnabled = initiallyEnabled
-            inputCallback = createInputCallback(sessionEpoch.begin())
+            // start() can be reached more than once while the same MappingService stays alive
+            // (for example, after a Binder notification or an explicit retry). Keep the callback
+            // already registered in UserService for that lifecycle. Creating a new epoch here
+            // would silently reject every event from that still-running remote callback.
+            if (SessionStartPolicy.shouldCreateFreshSession(active.get(), inputCallback != null)) {
+                inputCallback = createInputCallback(sessionEpoch.begin())
+                if (active.get()) {
+                    // Defensive recovery for an inconsistent active-without-callback state.
+                    captureStarted = false
+                    captureStarting = false
+                }
+            }
             active.set(true)
             registerLifecycleListeners()
             val connected = remote

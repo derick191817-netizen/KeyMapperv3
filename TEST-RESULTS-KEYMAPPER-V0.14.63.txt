@@ -1,0 +1,79 @@
+KEYMAPPER 0.14.63 — RESULTADOS DE VALIDAÇÃO
+==========================================
+
+VERSÃO
+------
+versionName: 0.14.63
+versionCode: 79
+CI artifact: keymapper-0.14.63-debug
+
+VERIFICAÇÕES HOST — PASS
+------------------------
+- tools/native-tests/run.sh
+- tools/native-tests/check-syntax.sh
+- tools/native-tests/check-library-contract.sh
+- tools/dependency-tests/check-kadb-coordinates.sh
+- tools/dependency-tests/check-jetifier-ignorelist.sh
+- tools/dependency-tests/test-kadb-selected-version.sh
+- tools/architecture-tests/check-wireless-adb-boundary.sh
+- tools/architecture-tests/check-shizuku-session-isolation.sh
+- tools/architecture-tests/check-session-start-idempotency.sh
+- tools/architecture-tests/check-hud-placement-policy.sh
+- tools/architecture-tests/check-overlay-window-placement.sh
+- tools/architecture-tests/check-visible-control-types.sh
+- tools/architecture-tests/check-macro-sequence-contract.sh
+- tools/build-tests/check-toolchain-compatibility.py
+- tools/build-tests/test-toolchain-compatibility.py
+
+Todos os comandos acima retornaram PASS na execução desta revisão.
+
+HARNESS KOTLIN LOCAL — PASS
+---------------------------
+Compilados com kotlinc 1.9.0 os arquivos:
+- data/Rot.kt
+- data/MacroStep.kt
+- data/HudButton.kt
+- data/MappingDataPolicy.kt
+- domain/MappingEditorPolicy.kt
+- harness de asserções MacroPolicyHarness.kt
+
+Foram usados stubs mínimos para android.view.KeyEvent e org.json; isso valida sintaxe e regras puras, não substitui compilação Android nem a implementação real do framework JSON.
+Casos aprovados:
+- elegibilidade de TAP/HOLD/SWIPE e rejeição de alvos incompatíveis;
+- normalização de destinos ausentes, próprios e incompatíveis;
+- duração por tipo e limites de repetição;
+- cursor sequencial na ordem configurada;
+- dois ciclos completos e término exato;
+- sequência vazia e repetição inválida normalizada para um ciclo;
+- snapshot independente de mutação da lista original;
+- limite de 32 etapas;
+- round-trip de dados do controle por API JSON simulada;
+- separação entre Combo legado e Macro sequencial.
+
+GRADLE / ANDROID BUILD — BLOQUEADO PELO AMBIENTE
+------------------------------------------------
+Executado:
+./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug --stacktrace --console=plain
+
+O Gradle Wrapper tentou baixar gradle-8.8-bin.zip e falhou antes de iniciar Gradle com:
+java.net.UnknownHostException: services.gradle.org
+
+Portanto, não foram executados:
+- :app:lintDebug
+- :app:testDebugUnitTest via Gradle/JUnit
+- :app:assembleDebug
+
+Nenhum APK foi produzido nesta sessão.
+
+VALIDAÇÃO EM DISPOSITIVO — PENDENTE
+-----------------------------------
+Ainda é necessário testar Android 13 / Samsung One UI / Samsung DeX, incluindo:
+- disparo real da Macro e soltura do gatilho;
+- cancelamento em perda de foco, pausa, troca de perfil e encerramento do serviço;
+- confirmação de ACTION_UP para o ponteiro em todos os caminhos;
+- Swipe de Macro no backend touchscreen real;
+- coexistência com Fire, Aim e WASD.
+
+GITHUB REMOTO
+-------------
+O repositório não foi modificado. A integração GitHub previamente recusou criação de branch com HTTP 403 (Resource not accessible by integration). A base remota conhecida permanece 0.14.55 até que o proprietário aplique o patch.

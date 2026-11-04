@@ -1,0 +1,51 @@
+KeyMapper 0.14.61 — resultados de validação
+Data da execução: 2026-11-04
+versionName: 0.14.61
+versionCode: 77
+
+APROVADO (host / scripts locais)
+- tools/native-tests/run.sh
+  PASS: evdev JNI batch recovery and keyboard HID classification host tests
+- tools/native-tests/check-syntax.sh
+  PASS: evdev_capture.cpp and uinput_touch.cpp syntax
+- tools/native-tests/check-library-contract.sh
+  PASS: CMake target, Kotlin loadLibrary name, packaged filename and diagnostic probe are consistent
+- tools/dependency-tests/check-kadb-coordinates.sh
+  PASS: Kadb Android AAR 2.1.4 + mDNS Android AAR 2.1.3; adapter e CI consistentes
+- tools/dependency-tests/check-jetifier-ignorelist.sh
+  PASS: Bouncy Castle jdk18on artefacts excluded only from Jetifier transformation
+- tools/dependency-tests/test-kadb-selected-version.sh
+  PASS: accepts Kadb 2.1.4 + BC 1.86 and rejects incompatible/vulnerable versions
+- tools/architecture-tests/check-wireless-adb-boundary.sh
+  PASS: UI -> internal contract -> Kadb adapter boundary
+- tools/architecture-tests/check-shizuku-session-isolation.sh
+  PASS: AIDL callbacks isolated by session; stop invalidates session before async cleanup
+- tools/architecture-tests/check-session-start-idempotency.sh
+  PASS: start() reuses callback for active session and creates a new epoch only for new/recovered lifecycle
+- tools/architecture-tests/check-hud-placement-policy.sh
+  PASS: Tecla/Tiro/Mira creation and duplication use collision-aware placement; contract tests exist
+- tools/architecture-tests/check-overlay-window-placement.sh
+  PASS: overlay dimensions/position bounded and tested for portrait, landscape and small displays
+- tools/architecture-tests/check-visible-control-types.sh
+  PASS: Tap/Hold/Fire/WASD+Stick/Aim/Swipe, settings, Combo, Rapid Tap and engine routes are asserted
+- tools/build-tests/check-toolchain-compatibility.py
+  PASS: Kotlin/AGP/Gradle/JDK/SDK/NDK/CMake matrix within configured bounds; versionCode 77, versionName 0.14.61 and CI artifact are aligned
+- tools/build-tests/test-toolchain-compatibility.py
+  PASS: rejects mismatched Compose, low Gradle, missing NDK and wrong artifact name
+- YAML parse of .github/workflows/build.yml via PyYAML
+  PASS: workflow YAML parsed successfully
+- Kotlin host harness (kotlinc + temporary Android/model stubs)
+  PASS: Tap/Hold/Fire/Combo labels, Fire M1 default conflict policy, Combo eligibility, Rapid Tap bounds and Swipe interpolation.
+
+NOT EXECUTED / BLOCKED
+- ./gradlew --no-daemon :app:lintDebug --stacktrace --console=plain
+  Attempted. Wrapper tried to download Gradle 8.8 from https://services.gradle.org/distributions/gradle-8.8-bin.zip and failed before Gradle startup with java.net.UnknownHostException: services.gradle.org.
+- :app:testDebugUnitTest
+  Not executed: Gradle 8.8 distribution unavailable.
+- :app:assembleDebug
+  Not executed: Gradle 8.8 distribution unavailable.
+- Android instrumentation and physical test on Android 13 / Samsung One UI / DeX
+  Not executed: no attached target device or Android runtime test session.
+
+Interpretation
+Host checks and Kotlin policy harness pass. This does NOT establish successful Android compilation, a generated APK, or runtime behavior on the target phone. No APK is included.

@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.keymapper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 71
-        versionName = "0.14.55"
+        versionCode = 81
+        versionName = "0.14.65"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {
@@ -94,10 +94,17 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
 
-    // Cliente ADB TLS independente do Shizuku. O core 2.1.5 foi publicado no Maven Central.
-    implementation("com.flyfishxu:kadb:2.1.5")
-    // Maven Central confirma o módulo raiz mDNS até 2.1.3. O 2.1.4/2.1.5 não foi resolvido pelo runner.
+    // Cliente ADB Android independente do Shizuku.
+    // Fixar diretamente o AAR Android 2.1.4 evita a variante 2.1.5, compilada para Java 25
+    // (class major 69), que o Jetifier/AGP 8.5.2 não consegue analisar.
+    implementation("com.flyfishxu:kadb-android:2.1.4")
+    // mDNS Android publicado e validado no Maven Central.
     implementation("com.flyfishxu:kadb-mdns-android:2.1.3")
+    // Kadb 2.1.4 declara Bouncy Castle 1.84, anterior às correções de segurança 1.85.
+    // Fixar a família inteira em 1.86 mantém os módulos criptográficos alinhados.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.86")
+    implementation("org.bouncycastle:bcutil-jdk18on:1.86")
 
     testImplementation("junit:junit:4.13.2")
 }

@@ -1,0 +1,36 @@
+KeyMapper 0.14.60 — resultados de validação
+versionName=0.14.60
+versionCode=76
+artifact=keymapper-0.14.60-debug
+
+PASS — native-tests/run.sh: recuperação de lotes JNI e classificação de dispositivos.
+PASS — macro pad com uma tecla detectado.
+PASS — teclado numérico/macro pad com três teclas detectado.
+PASS — KEY_OK e KEY_CHANNELUP acima de BTN_MISC permanecem classificados como KEY.
+PASS — BTN_MOUSE, BTN_GAMEPAD, BTN_DPAD e BTN_GRIP não são classificados como KEY.
+PASS — BTN_TRIGGER_HAPPY continua excluído da classe de teclado.
+PASS — HID misto aceita KEY_* e filtra BTN_*.
+PASS — bitmap vazio, ponteiro nulo e wordCount=0 tratados sem dereferência inválida.
+PASS — native-tests/check-syntax.sh: sintaxe C++17/JNI de evdev_capture.cpp e uinput_touch.cpp.
+PASS — native-tests/check-library-contract.sh: CMake, System.loadLibrary, arquivo e probe alinhados.
+PASS — Kotlin LinuxInputKeyMapper compilado em harness host e mapeamentos estendidos exercitados com constantes stub compatíveis com Android API.
+PASS — dependency-tests/check-kadb-coordinates.sh.
+PASS — dependency-tests/check-jetifier-ignorelist.sh.
+PASS — dependency-tests/test-kadb-selected-version.sh.
+PASS — architecture-tests/check-wireless-adb-boundary.sh.
+PASS — architecture-tests/check-shizuku-session-isolation.sh.
+PASS — architecture-tests/check-session-start-idempotency.sh.
+PASS — architecture-tests/check-hud-placement-policy.sh.
+PASS — architecture-tests/check-overlay-window-placement.sh.
+PASS — architecture-tests/check-visible-control-types.sh.
+PASS — build-tests/check-toolchain-compatibility.py.
+PASS — build-tests/test-toolchain-compatibility.py (casos negativos).
+PASS — parse YAML GitHub Actions e coerência do artefato 0.14.60.
+
+NOT RUN — :app:lintDebug (Gradle Wrapper 8.8 não estava disponível; falha DNS ao baixar services.gradle.org).
+NOT RUN — :app:testDebugUnitTest (JUnit/Gradle não executado neste ambiente).
+NOT RUN — :app:assembleDebug (nenhum APK gerado).
+NOT RUN — instalação/teste em Android 13, One UI e Samsung DeX.
+NOT PUBLISHED — criação de branch no GitHub anteriormente recusada com HTTP 403 Resource not accessible by integration; main remoto ainda deve ser conferido antes de aplicar.
+
+Conclusão: verificações host/nativas/dependências/arquitetura/toolchain passaram. A compilação Android real, Lint, JUnit Gradle, APK e validação em aparelho permanecem pendentes. Esta entrega contém código-fonte e patch, não APK.

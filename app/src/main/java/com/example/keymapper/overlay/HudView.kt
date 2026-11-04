@@ -14,6 +14,7 @@ import com.example.keymapper.data.AppSettings
 import com.example.keymapper.data.HudButton
 import com.example.keymapper.data.Kind
 import com.example.keymapper.data.Mode
+import com.example.keymapper.data.MacroAction
 import com.example.keymapper.data.displayName
 import com.example.keymapper.data.keyLabel
 import com.example.keymapper.domain.MappingEditorPolicy
@@ -64,7 +65,8 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
     private class Grip(val id: Int, val x: Float, val y: Float)
 
     private var selected = NONE
-    private var armedKind = Kind.STANDARD   // tipo do próximo botão criado com o +
+    private var armedKind = Kind.STANDARD   // família do próximo controle criado com o +
+    private var armedMode = Mode.HOLD       // Tap/Hold mantêm modos distintos na biblioteca
     private var dragging = false
     private var bodyTouchCandidate = NONE
     private var pressedHit: Pair<RectF, () -> Unit>? = null
@@ -171,10 +173,13 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             val cy = py(b.y)
             val r = radius(b, s)
             val ring: Int? = if (editing && selected == b.id) Color.YELLOW else null
-            val label = keyLabel(b.key) + when {
+            if (b.kind == Kind.SWIPE) drawSwipePath(c, b)
+            val label = (if (b.kind == Kind.MACRO) "M" else keyLabel(b.key)) + when {
                 b.kind == Kind.AIM -> "◎"
-                b.macro.isNotEmpty() -> "+"
+                b.kind == Kind.SWIPE -> "↗"
+                b.isCombo || b.macro.isNotEmpty() -> if (b.macro.isEmpty()) "C" else "+"
                 b.kind == Kind.STANDARD && b.mode == Mode.TOGGLE -> "•"
+                b.kind == Kind.STANDARD && b.mode == Mode.RAPID -> "R"
                 else -> ""
             }
             ButtonRenderer.draw(c, paint, s.hudStyle, b, label, cx, cy, r, ga, ring, dp)
@@ -211,6 +216,28 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         c.drawLine(cx, cy + gap, cx, cy + len, paint)
         paint.style = Paint.Style.FILL
         c.drawCircle(cx, cy, 1.5f * dp, paint)
+    }
+
+    private fun drawSwipePath(c: Canvas, b: HudButton) {
+        val sx = px(b.x)
+        val sy = py(b.y)
+        val ex = px(b.swipeEndX)
+        val ey = py(b.swipeEndY)
+        val dx = ex - sx
+        val dy = ey - sy
+        val length = hypot(dx, dy).coerceAtLeast(1f)
+        val ux = dx / length
+        val uy = dy / length
+        val head = 10f * dp
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f * dp
+        paint.color = Color.argb(220, 177, 145, 255)
+        c.drawLine(sx, sy, ex, ey, paint)
+        c.drawLine(ex, ey, ex - ux * head - uy * head * 0.55f, ey - uy * head + ux * head * 0.55f, paint)
+        c.drawLine(ex, ey, ex - ux * head + uy * head * 0.55f, ey - uy * head - ux * head * 0.55f, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(210, 177, 145, 255)
+        c.drawCircle(ex, ey, 4f * dp, paint)
     }
 
     /**
@@ -388,17 +415,33 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             )
         }
         if (editing && armed) {
-            text(c, "Escolha o tipo; ABC cria um controle para associar uma tecla", w / 2f, topY + 36f * dp, 11 * dp, Color.WHITE)
+            text(c, "Biblioteca HUD · escolha uma ferramenta e associe a entrada", w / 2f, topY + 36f * dp, 11 * dp, Color.WHITE)
             val center = w / 2f
-            val pillGap = min(66f * dp, (w / 2f - 34f * dp).coerceAtLeast(30f * dp))
+            val pillGap = min(64f * dp, ((w / 2f - 32f * dp) / 2f).coerceAtLeast(27f * dp))
             val menuY = topY + 78f * dp
-            pill(c, "Tecla", center - pillGap, menuY, armedKind == Kind.STANDARD) { armedKind = Kind.STANDARD; invalidate() }
-            pill(c, "Tiro", center, menuY, armedKind == Kind.FIRE) { armedKind = Kind.FIRE; invalidate() }
-            pill(c, "Mira", center + pillGap, menuY, armedKind == Kind.AIM) { armedKind = Kind.AIM; invalidate() }
+            val library = listOf(
+                Triple("Tap", Kind.STANDARD, Mode.TAP),
+                Triple("Hold", Kind.STANDARD, Mode.HOLD),
+                Triple("Fire", Kind.FIRE, Mode.HOLD),
+                Triple("Aim", Kind.AIM, Mode.HOLD),
+                Triple("Swipe", Kind.SWIPE, Mode.HOLD),
+                Triple("Macro", Kind.MACRO, Mode.HOLD)
+            )
+            library.forEachIndexed { index, item ->
+                val row = index / 3
+                val column = index % 3
+                val offset = column - 1
+                val selectedType = armedKind == item.second && armedMode == item.third
+                pill(c, item.first, center + offset * pillGap, menuY + row * 36f * dp, selectedType) {
+                    armedKind = item.second
+                    armedMode = item.third
+                    invalidate()
+                }
+            }
             val mouseGap = min(64f * dp, (w / 2f - 30f * dp).coerceAtLeast(30f * dp))
-            chip(c, "M1", center - mouseGap, menuY + 42f * dp) { addButton(-1) }
-            chip(c, "ABC", center, menuY + 42f * dp) { addButton(0) }
-            chip(c, "M2", center + mouseGap, menuY + 42f * dp) { addButton(-2) }
+            chip(c, "M1", center - mouseGap, menuY + 78f * dp) { addButton(-1) }
+            chip(c, "ABC", center, menuY + 78f * dp) { addButton(0) }
+            chip(c, "M2", center + mouseGap, menuY + 78f * dp) { addButton(-2) }
         }
     }
 
@@ -411,6 +454,8 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
     fun finishEditing(saveChanges: Boolean) {
         if (!editing) return
         armed = false
+        armedKind = Kind.STANDARD
+        armedMode = Mode.HOLD
         if (!saveChanges) {
             editingSnapshot?.let { host.update(it) }
             Toast.makeText(context, "Alterações da sessão descartadas.", Toast.LENGTH_SHORT).show()
@@ -517,17 +562,25 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             invalidate()
             return
         }
-        val name = when (kind) {
-            Kind.FIRE -> "Tiro"
-            Kind.AIM -> "Mira"
-            else -> "Padrão"
+        val name = when {
+            kind == Kind.FIRE -> "Fire"
+            kind == Kind.AIM -> "Aim / Sight"
+            kind == Kind.SWIPE -> "Swipe"
+            kind == Kind.MACRO -> "Macro"
+            armedMode == Mode.TAP -> "Tap"
+            armedMode == Mode.RAPID -> "Rapid Tap"
+            else -> "Hold"
         }
+        val bindings = current.buttons.map { MappingEditorPolicy.KeyBinding(it.id, it.displayName(), it.key) }
+        val requestedKey = if (kind == Kind.FIRE && key == 0) {
+            MappingEditorPolicy.defaultFireBinding(current.editKey, current.pauseKey, bindings)
+        } else key
         val conflict = MappingEditorPolicy.findConflict(
-            candidateCode = key,
+            candidateCode = requestedKey,
             targetControlId = id,
-            bindings = current.buttons.map { MappingEditorPolicy.KeyBinding(it.id, it.displayName(), it.key) }
+            bindings = bindings
         )
-        val assignedKey = if (conflict == null || key == 0) key else {
+        val assignedKey = if (conflict == null || requestedKey == 0) requestedKey else {
             Toast.makeText(
                 context,
                 "${com.example.keymapper.data.keyLabel(key)} já está atribuída a '${conflict.label}'. O novo controle ficará sem tecla até você escolher outra.",
@@ -538,14 +591,11 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
         updateArea()
         // A política nova melhora somente controles padrão de uso geral. Tipos especializados
         // permanecem no comportamento legado e não recebem automação ou assistência adicional.
-        val placement = if (kind == Kind.STANDARD) {
-            findFreeButtonPosition(
-                settings = current,
-                candidateRadiusPx = 0.07f * current.buttonScale * am() / 2f
-            )
-        } else {
-            HudPlacementPolicy.Point(0.5f, 0.5f)
-        }
+        // Todos os tipos usam a mesma política de colisão; Tiro/Mira não devem nascer empilhados.
+        val placement = findFreeButtonPosition(
+            settings = current,
+            candidateRadiusPx = 0.07f * current.buttonScale * am() / 2f
+        )
         mutate {
             it.copy(buttons = it.buttons + HudButton(
                 id = id,
@@ -553,12 +603,16 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
                 x = placement.x,
                 y = placement.y,
                 kind = kind,
-                name = name
+                mode = if (kind == Kind.FIRE) Mode.HOLD else armedMode,
+                name = name,
+                swipeEndX = (placement.x + 0.18f).coerceIn(0.02f, 0.98f),
+                swipeEndY = placement.y
             ))
         }
         selected = id
         armed = false
         armedKind = Kind.STANDARD
+        armedMode = Mode.HOLD
         host.persist()
         Haptics.tick(this)
         host.openConfig(id)
@@ -596,17 +650,13 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             MappingEditorPolicy.boundedCenter(original.x + 0.045f, r / aW.coerceAtLeast(1f)),
             MappingEditorPolicy.boundedCenter(original.y + 0.045f, r / aH.coerceAtLeast(1f))
         )
-        val placement = if (original.kind == Kind.STANDARD) {
-            findFreeButtonPosition(
-                settings = s,
-                candidateRadiusPx = r,
-                excludedControlId = original.id,
-                preferred = legacyPreferred
-            )
-        } else {
-            // Mantém a geometria anterior dos tipos especializados, sem ampliá-los nesta etapa.
-            legacyPreferred
-        }
+        // Duplicatas de Tecla/Tiro/Mira recebem a mesma prevenção de colisão.
+        val placement = findFreeButtonPosition(
+            settings = s,
+            candidateRadiusPx = r,
+            excludedControlId = original.id,
+            preferred = legacyPreferred
+        )
         val duplicate = original.copy(
             id = id,
             key = 0, // duplicar não deve criar conflito nem disparar uma ação sem confirmação
@@ -665,6 +715,7 @@ class HudView(ctx: Context, private val host: Host) : View(ctx) {
             s.copy(buttons = s.buttons.filter { it.id != id }
                 .map { it.copy(
                     macro = it.macro.filter { m -> m != id },
+                    sequence = it.sequence.filter { step -> step.action == MacroAction.WAIT || step.targetId != id },
                     linkAimId = if (it.linkAimId == id) -1 else it.linkAimId
                 ) })
         }

@@ -32,16 +32,35 @@ object MappingDataPolicy {
         val kinds = unique.associate { it.id to it.kind }
         return unique.map { button ->
             val safeMacro = button.macro.asSequence()
-                .filter { it != button.id && it in ids }
+                .filter { targetId ->
+                    val target = unique.firstOrNull { it.id == targetId }
+                    targetId != button.id && targetId in ids && button.kind != Kind.MACRO &&
+                        target != null && !target.isCombo && target.kind != Kind.MACRO &&
+                        target.kind != Kind.SWIPE &&
+                        !(target.kind == Kind.STANDARD && target.mode == Mode.RAPID)
+                }
                 .distinct()
                 .take(MAX_CONTROLS)
                 .toList()
+            val safeSequence = if (button.kind == Kind.MACRO) {
+                MacroStepPolicy.normalizeSteps(button.sequence, button.id, unique)
+            } else emptyList()
+            val safeRepeatCount = MacroStepPolicy.repeatCount(button.sequenceRepeatCount)
             val targetId = button.linkAimId
             val safeAimLink = targetId.takeIf {
                 it >= 0 && it != button.id && kinds[it] == Kind.AIM
             } ?: -1
-            if (safeMacro == button.macro && safeAimLink == button.linkAimId) button
-            else button.copy(macro = safeMacro, linkAimId = safeAimLink)
+            if (safeMacro == button.macro && safeAimLink == button.linkAimId &&
+                safeSequence == button.sequence && safeRepeatCount == button.sequenceRepeatCount &&
+                !(button.kind == Kind.MACRO && button.isCombo)
+            ) button
+            else button.copy(
+                macro = safeMacro,
+                linkAimId = safeAimLink,
+                sequence = safeSequence,
+                sequenceRepeatCount = safeRepeatCount,
+                isCombo = if (button.kind == Kind.MACRO) false else button.isCombo
+            )
         }
     }
 }

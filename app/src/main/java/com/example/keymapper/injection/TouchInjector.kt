@@ -101,6 +101,9 @@ class TouchInjector(
 
     fun isDown(id: Int) = pts.containsKey(id)
 
+    /** True while a pointer cannot safely be reacquired because release/shutdown is pending. */
+    fun isReleasePending(id: Int) = shutdownRequested.get() || virtualReleasePending || id in pendingReleaseIds
+
     private fun sane(v: Float): Float = if (v.isNaN()) 0f else v.coerceIn(-1_000_000f, 1_000_000f)
 
     fun down(id: Int, x: Float, y: Float) {

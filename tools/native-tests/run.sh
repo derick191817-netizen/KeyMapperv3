@@ -6,4 +6,8 @@ CXX="${CXX:-g++}"
 "$CXX" -std=c++17 -Wall -Wextra -Werror -I"$ROOT/app/src/main/cpp" \
   "$ROOT/tools/native-tests/evdev_batch_recovery_test.cpp" -o "$OUT"
 "$OUT"
-echo "PASS: evdev JNI batch recovery host tests"
+CLASSIFICATION_OUT="${TMPDIR:-/tmp}/keymapper-evdev-device-classification-test"
+"$CXX" -std=c++17 -Wall -Wextra -Werror -I"$ROOT/app/src/main/cpp" \
+  "$ROOT/tools/native-tests/evdev_device_classification_test.cpp" -o "$CLASSIFICATION_OUT"
+"$CLASSIFICATION_OUT"
+echo "PASS: evdev JNI batch recovery and keyboard HID classification host tests"

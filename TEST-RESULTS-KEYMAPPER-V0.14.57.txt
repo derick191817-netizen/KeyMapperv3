@@ -1,0 +1,25 @@
+KeyMapper 0.14.57 — resultados da validação local
+
+PASS
+- tools/dependency-tests/check-kadb-coordinates.sh
+- tools/dependency-tests/check-jetifier-ignorelist.sh
+- tools/dependency-tests/test-kadb-selected-version.sh
+- tools/architecture-tests/check-visible-control-types.sh (gating real com serviço/overlay/Shizuku/perfil e seleção persistente ao arrastar)
+- tools/architecture-tests/check-hud-placement-policy.sh (todos os três tipos)
+- tools/build-tests/check-toolchain-compatibility.py (AGP 8.5.2, Kotlin/Compose 2.4.21, Gradle 8.8, JDK/JVM 17, SDK 34, NDK 26.3.11579264, CMake 3.22.1; versionCode 73 / versionName 0.14.57)
+- tools/build-tests/test-toolchain-compatibility.py (quatro cenários negativos)
+- tools/native-tests/run.sh
+- tools/native-tests/check-syntax.sh
+- tools/native-tests/check-library-contract.sh
+- tools/architecture-tests/check-wireless-adb-boundary.sh
+- tools/architecture-tests/check-shizuku-session-isolation.sh
+- tools/architecture-tests/check-overlay-window-placement.sh
+
+PENDENTE — compilação real
+- Tentativa: ./gradlew --offline :app:testDebugUnitTest --stacktrace --console=plain
+- O Gradle Wrapper tentou baixar Gradle 8.8 de services.gradle.org e falhou antes de iniciar com UnknownHostException.
+- :app:lintDebug, :app:testDebugUnitTest e :app:assembleDebug não foram executados.
+- Nenhum APK foi gerado nesta sessão.
+- Nenhum teste físico foi feito em Android 13 / One UI / Samsung DeX.
+
+Conclusão: os contratos estáticos e testes host listados passaram; a entrega ainda precisa de validação Gradle real no GitHub Actions e teste de uso no dispositivo.

@@ -1,0 +1,33 @@
+KeyMapper 0.14.58 — resultados de validação
+versionName=0.14.58
+versionCode=74
+artifact=keymapper-0.14.58-debug
+
+PASS — SessionStartPolicy compilada com kotlinc-jvm 1.9.0 e executada em harness isolado.
+PASS — primeira inicialização cria sessão.
+PASS — chamada repetida com sessão ativa e callback existente preserva o token já registrado.
+PASS — sessão ativa sem callback é recuperável e invalida token anterior.
+PASS — serviço inativo não reutiliza callback antigo.
+PASS — check-session-start-idempotency.sh.
+PASS — native-tests/run.sh.
+PASS — native-tests/check-syntax.sh.
+PASS — native-tests/check-library-contract.sh.
+PASS — dependency-tests/check-kadb-coordinates.sh.
+PASS — dependency-tests/check-jetifier-ignorelist.sh.
+PASS — dependency-tests/test-kadb-selected-version.sh.
+PASS — architecture-tests/check-wireless-adb-boundary.sh.
+PASS — architecture-tests/check-shizuku-session-isolation.sh.
+PASS — architecture-tests/check-hud-placement-policy.sh.
+PASS — architecture-tests/check-overlay-window-placement.sh.
+PASS — architecture-tests/check-visible-control-types.sh.
+PASS — build-tests/check-toolchain-compatibility.py.
+PASS — build-tests/test-toolchain-compatibility.py.
+PASS — parse do YAML do GitHub Actions e presença das etapas Lint, JUnit, assembleDebug e publicação de artefato.
+
+NOT RUN — :app:lintDebug (Gradle Wrapper 8.8 não pôde ser baixado por falha DNS de services.gradle.org).
+NOT RUN — :app:testDebugUnitTest (Gradle Wrapper indisponível).
+NOT RUN — :app:assembleDebug (Gradle Wrapper indisponível; nenhum APK foi gerado).
+NOT RUN — instalação/teste em Android 13, One UI e Samsung DeX.
+NOT PUBLISHED — GitHub recusou a criação de branch com HTTP 403 Resource not accessible by integration.
+
+Conclusão: as verificações host e contratos passaram. A validação Android/CI e hardware permanece pendente.

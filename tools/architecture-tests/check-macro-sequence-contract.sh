@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MODEL="$ROOT/app/src/main/java/com/example/keymapper/data/HudButton.kt"
+STEP="$ROOT/app/src/main/java/com/example/keymapper/data/MacroStep.kt"
+DATA="$ROOT/app/src/main/java/com/example/keymapper/data/MappingDataPolicy.kt"
+ENGINE="$ROOT/app/src/main/java/com/example/keymapper/mapping/MappingEngine.kt"
+CONFIG="$ROOT/app/src/main/java/com/example/keymapper/overlay/ConfigPanelView.kt"
+EDITOR="$ROOT/app/src/main/java/com/example/keymapper/ui/MappingEditorScreen.kt"
+for file in "$MODEL" "$STEP" "$DATA" "$ENGINE" "$CONFIG" "$EDITOR"; do
+  [[ -s "$file" ]] || { echo "FAIL: arquivo Macro ausente/vazio: $file" >&2; exit 1; }
+done
+
+grep -Fq 'const val MACRO = 4' "$MODEL"
+grep -Fq 'val sequence: List<MacroStep>' "$MODEL"
+grep -Fq 'put("sequence"' "$MODEL"
+grep -Fq 'put("sequenceRepeatCount"' "$MODEL"
+grep -Fq '"MACRO" -> Kind.MACRO' "$MODEL"
+grep -Fq 'const val MAX_STEPS = 32' "$STEP"
+grep -Fq 'const val MAX_REPEATS = 20' "$STEP"
+grep -Fq 'const val WAIT = 0' "$STEP"
+grep -Fq 'const val TAP = 1' "$STEP"
+grep -Fq 'const val HOLD = 2' "$STEP"
+grep -Fq 'const val SWIPE = 3' "$STEP"
+grep -Fq 'fun normalizeSteps' "$STEP"
+grep -Fq 'class MacroSequenceCursor' "$STEP"
+grep -Fq 'MacroStepPolicy.normalizeSteps' "$DATA"
+grep -Fq 'target.kind != Kind.MACRO' "$DATA"
+grep -Fq 'Kind.MACRO -> macroKey(b, s, down)' "$ENGINE"
+grep -Fq 'private fun startMacro' "$ENGINE"
+grep -Fq 'run.cursor.nextStep()' "$ENGINE"
+grep -Fq 'private fun startMacroSwipe' "$ENGINE"
+grep -Fq 'private fun cancelMacro' "$ENGINE"
+grep -Fq 'macroRuns.values.toList()' "$ENGINE"
+grep -Fq 'run.keyCode in held' "$ENGINE"
+grep -Fq 'private fun buildMacro' "$CONFIG"
+grep -Fq 'keyBlock(b, 1, "Atalho de execução"' "$CONFIG"
+grep -Fq 'Repetições da sequência' "$CONFIG"
+grep -Fq 'ADICIONAR ETAPA' "$CONFIG"
+grep -Fq 'MacroStep(MacroAction.WAIT' "$CONFIG"
+grep -Fq 'private fun addMacroTargetButtons' "$CONFIG"
+grep -Fq 'ControlLibraryTile("Macro"' "$EDITOR"
+# Combo remains simultaneous and uses the old Int ID list; it cannot nest a Macro.
+grep -Fq 'if (b.isCombo || b.macro.isNotEmpty())' "$ENGINE"
+grep -Fq 'Macro sequencial não pode ser aninhada em Combo' "$ENGINE"
+grep -Fq 'target.kind != Kind.MACRO' "$ROOT/app/src/main/java/com/example/keymapper/domain/MappingEditorPolicy.kt"
+echo 'PASS: Macro sequencial tem modelo JSON isolado, passos limitados, destinos validados, execução serial, repetição finita e cancelamento; Combo permanece separado.'

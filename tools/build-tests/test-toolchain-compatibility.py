@@ -12,6 +12,7 @@ FILES = (
     "build.gradle.kts",
     "gradle/wrapper/gradle-wrapper.properties",
     "app/build.gradle.kts",
+    "gradle.properties",
     ".github/workflows/build.yml",
     "tools/build-tests/check-toolchain-compatibility.py",
 )
@@ -40,7 +41,7 @@ CASES = (
     (
         "nome de artefato divergente",
         ".github/workflows/build.yml",
-        "keymapper-0.14.55-debug",
+        "keymapper-0.14.65-debug",
         "keymapper-0.14.54-debug",
         "nome do artefato CI",
     ),

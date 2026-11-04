@@ -1,8 +1,63 @@
 package com.example.keymapper.domain
 
+import com.example.keymapper.data.HudButton
+import com.example.keymapper.data.Kind
+import com.example.keymapper.data.Mode
+import com.example.keymapper.data.MacroStep
+import com.example.keymapper.data.MacroStepPolicy
+
 /** Regras puras do editor, separadas da View para permitir regressão determinística. */
 object MappingEditorPolicy {
     data class KeyBinding(val controlId: Int, val label: String, val code: Int)
+
+    /** Labels compartilhados pela prévia, tabela e painel de propriedades. */
+    fun controlKindLabel(kind: Int): String = when (kind) {
+        Kind.FIRE -> "Fire"
+        Kind.AIM -> "Aim / Sight"
+        Kind.SWIPE -> "Swipe"
+        Kind.MACRO -> "Macro"
+        else -> "Controle"
+    }
+
+    /** Nome funcional mostrado na biblioteca/tabela; Tap e Hold continuam usando o motor padrão. */
+    fun controlDisplayLabel(kind: Int, mode: Int, isCombo: Boolean = false): String = when {
+        isCombo -> "Combo"
+        else -> when (kind) {
+            Kind.FIRE -> "Fire"
+            Kind.AIM -> "Aim / Sight"
+            Kind.SWIPE -> "Swipe"
+            Kind.MACRO -> "Macro"
+            else -> when (mode) {
+                Mode.TAP -> "Tap"
+                Mode.RAPID -> "Rapid Tap"
+                Mode.TOGGLE -> "Alternar"
+                Mode.DOUBLE -> "Duplo toque"
+                else -> "Hold"
+            }
+        }
+    }
+
+    /** Combo não pode incluir a si mesmo, outro Combo, Swipe cancelável ou Rapid Tap contínuo. */
+    fun isComboTargetEligible(ownerId: Int, target: HudButton): Boolean =
+        target.id != ownerId &&
+            !target.isCombo && target.macro.isEmpty() &&
+            target.kind != Kind.SWIPE &&
+            target.kind != Kind.MACRO &&
+            !(target.kind == Kind.STANDARD && target.mode == Mode.RAPID)
+
+    fun isMacroTargetEligible(ownerId: Int, action: Int, target: HudButton): Boolean =
+        target.id != ownerId && MacroStepPolicy.isTargetEligible(action, target)
+
+    fun normalizedMacroSteps(steps: List<MacroStep>, ownerId: Int, buttons: List<HudButton>): List<MacroStep> =
+        MacroStepPolicy.normalizeSteps(steps, ownerId, buttons)
+
+    fun normalizedMacroRepeatCount(value: Int): Int = MacroStepPolicy.repeatCount(value)
+
+    /** Fire sugere M1, mas nunca toma uma associação existente nem um atalho global do serviço. */
+    fun defaultFireBinding(editKey: Int, pauseKey: Int, bindings: Iterable<KeyBinding>): Int =
+        if (findConflict(-1, Int.MIN_VALUE, bindings) == null &&
+            !conflictsWithGlobalShortcut(-1, editKey, pauseKey)
+        ) -1 else 0
 
     /** Retorna a associação conflitante, ignorando o próprio controle e códigos não atribuídos. */
     fun findConflict(

@@ -1,31 +1,23 @@
-# KeyMapper 0.14.55 — projeto Android
+# KeyMapper 0.14.65 — Android HUD Mapper
 
-## Mudanças da versão 0.14.55
+`versionName=0.14.65` · `versionCode=81`
 
-- Painel de configuração do HUD agora usa `OverlayWindowPlacementPolicy` para calcular posição e dimensões dentro dos limites do display.
-- Em paisagem, o painel fica no lado oposto ao controle selecionado; em retrato, na borda oposta vertical.
-- Margens levam em conta a densidade da interface e são limitadas em displays pequenos.
-- O posicionamento usa gravidade física TOP|LEFT e coordenadas explícitas, sem depender da direção RTL.
-- Removida uma chamada duplicada de notificação ao restaurar a captura ao fechar o painel.
-- Cinco testes de política e uma barreira arquitetural adicionados ao GitHub Actions.
+## Alterações desta revisão
 
-Versão Android: `versionName 0.14.55` / `versionCode 71`; artefato CI `keymapper-0.14.55-debug`.
+- Controle de contatos touchscreen com ownership por origem: entrada física, Combos diferentes, Fire ligado à mira e toque transitório podem compartilhar um contato sem soltar uns aos outros.
+- Fire ligado à mira não libera indevidamente uma mira que continua pressionada pela tecla física ou por outro Fire.
+- Fire acionado pela mira agora seleciona apenas controles `Kind.FIRE`; não dispara Swipe, Macro ou controles comuns por engano.
+- A seleção de câmera mantém a última mira ativa e restaura a anterior quando a mais recente é liberada.
+- `profiles: null` e qualquer tipo não-objeto inválido geram backup antes da sanitização; campo ausente segue compatível com perfis antigos.
+- Testes e contratos de CI adicionados para propriedade de contatos e recuperação de perfis.
 
-**Validação:** política de posicionamento compilada/executada com Kotlin; testes nativos, C++/CMake, dependências, arquitetura, isolamento Shizuku e toolchain passaram. O Gradle Wrapper não conseguiu baixar Gradle 8.8 neste ambiente por falha DNS; portanto JUnit via Gradle, Lint, APK e teste físico ainda estão pendentes.
+## Estado de validação
 
-Documentação detalhada:
-- `AUDITORIA-KEYMAPPER-V0.14.55.md`
-- `CHANGELOG-KEYMAPPER-V0.14.55.md`
-- `TEST-RESULTS-KEYMAPPER-V0.14.55.txt`
-- `docs/architecture/OVERLAY-PANEL-PLACEMENT-0.14.55.md`
-- `docs/COMPARACAO-FUNCIONAL-REFERENCIAS-0.14.55.md`
+Os testes host C++/JNI, EVDEV, políticas de arquitetura, contratos de dependência, toolchain, políticas de sessão Shizuku, HUD e overlays são executados separadamente. Os testes puros Kotlin desta revisão podem ser compilados em harness local, mas o Gradle Wrapper não conseguiu baixar Gradle 8.8 neste ambiente por falha DNS em `services.gradle.org`. Assim, `:app:lintDebug`, `:app:testDebugUnitTest`, `:app:assembleDebug` e o teste físico Android 13/One UI/DeX permanecem pendentes. Este pacote contém código-fonte, não APK.
 
----
+O repositório remoto consultado permanece na versão 0.14.55. A integração de escrita no GitHub recusou operações de branch com HTTP 403; esta entrega é local e não foi publicada no remoto.
 
-## Base técnica
 
-- Android phone-first, compatibilidade planejada com Samsung DeX.
-- Kotlin + Jetpack Compose para interface, regras e integração Android.
-- C++17/NDK para o backend nativo existente.
-- Shizuku/ADB com interfaces internas e recuperação limitada.
-- GitHub Actions executa verificações host antes de Lint, testes Android e `assembleDebug`.
+## Correção 0.14.65
+
+A recuperação agora cria backup também quando `buttons` ou `games` aparecem como JSON `null` ou com tipo inválido. Campos ausentes continuam compatíveis com configurações antigas. Ver `AUDITORIA-KEYMAPPER-V0.14.65.md`.

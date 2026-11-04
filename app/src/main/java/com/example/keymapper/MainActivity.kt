@@ -254,7 +254,7 @@ private fun ScreenContent(
         1 -> MappingEditorScreen(
             viewModel,
             onBack = { onNavigate(0) },
-            onOpenSettings = { onSettingsTab(2); onNavigate(2) }
+            onOpenSettings = { tab -> onSettingsTab(tab); onNavigate(2) }
         )
         else -> SettingsScreen(viewModel, tickState, onBack = { onNavigate(0) }, initialTab = settingsTab)
     }

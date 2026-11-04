@@ -1,0 +1,48 @@
+KEYMAPPER 0.14.65 — RESULTADOS DE VALIDACAO
+============================================================
+versionName: 0.14.65
+versionCode: 81
+Base de código: 0.14.64
+Gradle Wrapper: 8.8 (não iniciado; download bloqueado por DNS)
+JDK disponível no ambiente: 21.0.12 (a CI configura JDK 17)
+Android SDK: não instalado neste ambiente
+
+CORREÇÃO DE CÓDIGO
+- `SettingsRecoveryPolicy.shouldBackupInvalidArray()` adicionada.
+- `buttons` e `games` presentes como JSON null ou com tipo incorreto agora geram backup antes da sanitização.
+- Campos ausentes continuam compatíveis com configurações antigas; arrays válidos não geram backup.
+- Testes unitários JUnit ampliados com ausência, array válido, null e tipo incorreto.
+- Verificador de arquitetura atualizado para impedir regressão.
+- versionCode/versionName, CI artifact e verificadores de versão atualizados para 81 / 0.14.65.
+
+PASS — bash tools/native-tests/run.sh
+PASS — bash tools/native-tests/check-syntax.sh
+PASS — bash tools/native-tests/check-library-contract.sh
+PASS — bash tools/dependency-tests/check-kadb-coordinates.sh
+PASS — bash tools/dependency-tests/check-jetifier-ignorelist.sh
+PASS — bash tools/dependency-tests/test-kadb-selected-version.sh
+PASS — todos os scripts tools/architecture-tests/*.sh (9 verificadores)
+PASS — python3 tools/build-tests/check-toolchain-compatibility.py
+PASS — python3 tools/build-tests/test-toolchain-compatibility.py (4 casos negativos)
+PASS — harness Kotlin local de SettingsRecoveryPolicy (Kotlin 1.9.0 / JRE 21)
+
+BLOQUEADO — ./gradlew --no-daemon --version --stacktrace --console=plain
+O Wrapper tentou baixar https://services.gradle.org/distributions/gradle-8.8-bin.zip e terminou com:
+java.net.UnknownHostException: services.gradle.org
+O Gradle não iniciou. O bloqueio ocorreu antes da configuração ou compilação do projeto.
+
+NÃO EXECUTADO
+- :app:lintDebug
+- :app:testDebugUnitTest via Gradle/JUnit
+- :app:assembleDebug
+- Android instrumentation tests
+- Teste físico no Samsung Galaxy Note 20 Ultra / Android 13 / One UI / Samsung DeX
+- Validação real das rotas de entrada em firmware/hardware Samsung
+
+LIMITAÇÕES FUNCIONAIS CONHECIDAS
+- Wireless ADB ainda faz pareamento/conexão e diagnóstico somente leitura; não substitui o backend de entrada.
+- Root ainda não está integrado como provedor independente.
+- MappingService continua dependendo de Shizuku.
+
+CONCLUSÃO
+A correção de recuperação dos dados e os testes host/estáticos listados passaram. Compilação Android e testes físicos permanecem pendentes. Esta entrega contém código-fonte, não APK.

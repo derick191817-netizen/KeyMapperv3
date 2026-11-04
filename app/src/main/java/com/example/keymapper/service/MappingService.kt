@@ -28,9 +28,11 @@ import com.example.keymapper.data.AppSettings
 import com.example.keymapper.data.AppProfile
 import com.example.keymapper.data.Kind
 import com.example.keymapper.data.HudButton
+import com.example.keymapper.data.Mode
 import com.example.keymapper.data.SettingsRepository
 import com.example.keymapper.domain.PerformancePolicy
 import com.example.keymapper.domain.MappingEditorPolicy
+import com.example.keymapper.domain.HudPlacementPolicy
 import com.example.keymapper.display.DisplayHelper
 import com.example.keymapper.display.DisplayUtils
 import com.example.keymapper.display.ScreenInfo
@@ -76,9 +78,13 @@ class MappingService : Service(), HudView.Host {
         const val ACTION_STOP = "com.example.keymapper.STOP"
         const val ACTION_EDIT = "com.example.keymapper.EDIT"
         const val ACTION_BEGIN_EDIT = "com.example.keymapper.BEGIN_EDIT"
-        const val ACTION_ADD_STANDARD_CONTROL = "com.example.keymapper.ADD_STANDARD_CONTROL"
-        const val ACTION_CONFIG_STANDARD_BUTTON = "com.example.keymapper.CONFIG_STANDARD_BUTTON"
+        const val ACTION_ADD_STANDARD_CONTROL = "com.example.keymapper.ADD_STANDARD_CONTROL" // compatibilidade
+        const val ACTION_ADD_CONTROL = "com.example.keymapper.ADD_CONTROL"
+        const val ACTION_CONFIG_STANDARD_BUTTON = "com.example.keymapper.CONFIG_STANDARD_BUTTON" // compatibilidade
         const val EXTRA_BUTTON_ID = "com.example.keymapper.extra.BUTTON_ID"
+        const val EXTRA_CONTROL_KIND = "com.example.keymapper.extra.CONTROL_KIND"
+        const val EXTRA_CONTROL_MODE = "com.example.keymapper.extra.CONTROL_MODE"
+        const val EXTRA_CONTROL_NAME = "com.example.keymapper.extra.CONTROL_NAME"
 
         @Volatile
         var running = false
@@ -448,11 +454,22 @@ class MappingService : Service(), HudView.Host {
         }
     }
 
-    /** Cria um controle genérico de tecla no centro e abre as propriedades reais do HUD. */
-    private fun addStandardControl() {
+    /** Ação antiga mantida para intents já emitidos por versões anteriores. */
+    private fun addStandardControl() = addControl(Kind.STANDARD, Mode.HOLD, "Hold")
+
+    /** Cria um controle real da biblioteca, persistindo tipo, modo e nome no perfil ativo. */
+    private fun addControl(requestedKind: Int, requestedMode: Int = Mode.HOLD, requestedName: String? = null) {
         if (overlay?.canOpenConfig() != true || !running) {
             Toast.makeText(this, "Abra o aplicativo do perfil e aguarde o HUD ficar disponível.", Toast.LENGTH_LONG).show()
             return
+        }
+        val kind = requestedKind.takeIf {
+            it == Kind.STANDARD || it == Kind.FIRE || it == Kind.AIM || it == Kind.SWIPE || it == Kind.MACRO
+        } ?: Kind.STANDARD
+        val mode = when (kind) {
+            Kind.STANDARD -> requestedMode.takeIf { it in Mode.HOLD..Mode.RAPID } ?: Mode.HOLD
+            Kind.FIRE -> requestedMode.takeIf { it == Mode.TAP || it == Mode.HOLD } ?: Mode.HOLD
+            else -> Mode.HOLD
         }
         val current = cfg
         val id = MappingEditorPolicy.nextAvailableId(current.buttons.map { it.id }, current.buttons.size)
@@ -460,13 +477,53 @@ class MappingService : Service(), HudView.Host {
             Toast.makeText(this, "Limite de 128 controles por perfil atingido.", Toast.LENGTH_SHORT).show()
             return
         }
+        val defaultLabel = when {
+            kind == Kind.FIRE -> "Fire"
+            kind == Kind.AIM -> "Aim / Sight"
+            kind == Kind.SWIPE -> "Swipe"
+            kind == Kind.MACRO -> "Macro"
+            mode == Mode.TAP -> "Tap"
+            mode == Mode.RAPID -> "Rapid Tap"
+            else -> "Hold"
+        }
+        val label = requestedName?.trim()?.takeIf { it.isNotEmpty() }?.take(64) ?: defaultLabel
+        val bindings = current.buttons.map { MappingEditorPolicy.KeyBinding(it.id, it.displayName(), it.key) }
+        // Fire sugere o M1, mas não rouba uma associação existente nem um atalho global.
+        val assignedKey = if (kind == Kind.FIRE) {
+            MappingEditorPolicy.defaultFireBinding(current.editKey, current.pauseKey, bindings)
+        } else 0
+        if (kind == Kind.FIRE && assignedKey == 0) {
+            Toast.makeText(this, "M1 já está em uso ou reservado. Fire será criado sem associação para evitar conflito.", Toast.LENGTH_LONG).show()
+        }
+        val candidateRadius = 0.07f * current.buttonScale *
+            minOf(areaRect.width().coerceAtLeast(1f), areaRect.height().coerceAtLeast(1f)) / 2f
+        val minSide = minOf(areaRect.width().coerceAtLeast(1f), areaRect.height().coerceAtLeast(1f))
+        val occupied = current.buttons.map { button ->
+            HudPlacementPolicy.OccupiedCircle(
+                x = button.x, y = button.y,
+                radiusPx = button.size * button.visualScale * current.buttonScale * minSide / 2f
+            )
+        } + HudPlacementPolicy.OccupiedCircle(
+            x = current.joyX, y = current.joyY, radiusPx = current.joyR * minSide
+        )
+        val placement = HudPlacementPolicy.findPosition(
+            widthPx = areaRect.width(),
+            heightPx = areaRect.height(),
+            candidateRadiusPx = candidateRadius,
+            occupied = occupied,
+            preferred = HudPlacementPolicy.Point(0.5f, 0.5f)
+        )
         val control = HudButton(
             id = id,
-            key = 0,
-            x = 0.5f,
-            y = 0.5f,
-            name = "Tecla",
-            kind = Kind.STANDARD
+            key = assignedKey,
+            x = placement.x,
+            y = placement.y,
+            name = label,
+            kind = kind,
+            mode = mode,
+            swipeEndX = (placement.x + 0.18f).coerceIn(0.02f, 0.98f),
+            swipeEndY = placement.y,
+            isCombo = kind == Kind.STANDARD && label.equals("Combo", ignoreCase = true)
         )
         cfg = current.copy(buttons = current.buttons + control)
         recomputeArea()
@@ -936,9 +993,15 @@ class MappingService : Service(), HudView.Host {
                 else Toast.makeText(this, "O HUD ainda não está disponível no display selecionado.", Toast.LENGTH_LONG).show()
             }
             ACTION_ADD_STANDARD_CONTROL -> addStandardControl()
+            ACTION_ADD_CONTROL -> addControl(
+                intent?.getIntExtra(EXTRA_CONTROL_KIND, Kind.STANDARD) ?: Kind.STANDARD,
+                intent?.getIntExtra(EXTRA_CONTROL_MODE, Mode.HOLD) ?: Mode.HOLD,
+                intent?.getStringExtra(EXTRA_CONTROL_NAME)
+            )
             ACTION_CONFIG_STANDARD_BUTTON -> {
                 val id = intent?.getIntExtra(EXTRA_BUTTON_ID, -1) ?: -1
-                val target = cfg.buttons.firstOrNull { it.id == id && it.kind == Kind.STANDARD }
+                // ConfigPanelView já tem formulários específicos para Tecla, Tiro e Mira.
+                val target = cfg.buttons.firstOrNull { it.id == id }
                 if (target == null || overlay?.canOpenConfig() != true) {
                     Toast.makeText(this, "Este controle não está disponível no perfil ativo.", Toast.LENGTH_LONG).show()
                 } else {

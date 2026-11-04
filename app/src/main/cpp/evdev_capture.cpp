@@ -22,6 +22,7 @@
 #include <thread>
 #include <vector>
 #include "evdev_batch_recovery.h"
+#include "evdev_device_classification.h"
 
 // Compatibilidade com headers UAPI antigos de alguns toolchains NDK.
 #ifndef REL_WHEEL_HI_RES
@@ -106,7 +107,9 @@ bool isMouseButton(unsigned int code) {
 }
 
 bool isKeyboardKey(unsigned int code) {
-    return code <= KEY_MAX && !isMouseButton(code);
+    // BTN_* ocupa a faixa a partir de BTN_MISC e não deve vazar como tecla Android
+    // em HID composto que também anuncie um teclado.
+    return keymapper::input::isKeyboardKeyCode(code);
 }
 
 bool inspectDevice(Device& device) {
@@ -125,15 +128,10 @@ bool inspectDevice(Device& device) {
                             bitSet(keyBits, BTN_RIGHT);
     device.mouse = hasXY && hasButtons;
 
-    // Não exija A + Espaço + Enter: teclados compactos, numpads e HID customizados
-    // podem expor subconjuntos válidos. BTN_MISC (0x100) marca o início dos botões,
-    // portanto contamos apenas códigos da faixa de teclas de teclado.
-    unsigned int keyboardCapabilities = 0;
-    const unsigned int keyboardKeyLimit = std::min<unsigned int>(BTN_MISC, KEY_MAX + 1);
-    for (unsigned int code = 1; code < keyboardKeyLimit; ++code) {
-        if (bitSet(keyBits, code) && !isMouseButton(code)) ++keyboardCapabilities;
-    }
-    device.keyboard = keyboardCapabilities >= 4;
+    // Qualquer tecla real abaixo de BTN_MISC basta para reconhecer um teclado HID.
+    // O limite anterior de quatro códigos excluía macro pads de 1–3 teclas e numpads
+    // compactos. Botões BTN_* (gamepads, joysticks e mouse) continuam fora desta classe.
+    device.keyboard = keymapper::input::hasKeyboardCapabilities(keyBits, sizeof(keyBits) / sizeof(keyBits[0]));
     return device.mouse || device.keyboard;
 }
 

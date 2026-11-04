@@ -4,11 +4,13 @@ import android.view.KeyEvent
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Só 3 tipos de botão, como nos emuladores de PC. */
+/** Tipos persistidos de controle HUD. Tap/Hold/Combo/Rapid Tap compartilham STANDARD sem perder identidade de modo. */
 object Kind {
-    const val STANDARD = 0   // Padrão: simula qualquer tecla (espaço, C, R, Ctrl...)
-    const val FIRE = 1       // Tiro: segurar contínuo (ou toque único)
-    const val AIM = 2        // Mira: sensibilidade própria, suspender (toggle), mouse aim...
+    const val STANDARD = 0   // Tap/Hold/Combo/Rapid Tap: controles de toque geral.
+    const val FIRE = 1       // Fire: disparo especializado, independente do controle padrão.
+    const val AIM = 2        // Aim/Sight: controle de visão/câmera.
+    const val SWIPE = 3      // Swipe: gesto touchscreen com origem, destino e duração.
+    const val MACRO = 4      // Macro: sequência temporizada, distinta do Combo simultâneo.
 }
 
 /** Como o botão reage à tecla (botão padrão; no tiro só HOLD e TAP). */
@@ -17,6 +19,7 @@ object Mode {
     const val TAP = 1        // toque único e curto
     const val TOGGLE = 2     // aperta uma vez para ligar, outra para desligar
     const val DOUBLE = 3     // duplo toque: um aperto = dois toques curtos
+    const val RAPID = 4      // toques repetidos somente enquanto a entrada física estiver pressionada
 }
 
 /** Teclas do mouse usam códigos negativos: M1..M5 = -1..-5. */
@@ -70,7 +73,14 @@ data class HudButton(
     val aimZoom: Float = 1f,
     // ---- tiro ----
     val linkAimId: Int = -1,          // tiro: ao pressionar, aciona também esta mira
-    val visualScale: Float = 1f       // escala apenas de apresentação; não altera posição/ação mapeada
+    val visualScale: Float = 1f,      // escala apenas de apresentação; não altera posição/ação mapeada
+    val rapidIntervalMs: Int = 120,   // Rapid Tap: intervalo entre toques, 40..2000 ms
+    val swipeEndX: Float = 0.72f,     // Swipe: destino normalizado dentro da área do jogo
+    val swipeEndY: Float = 0.50f,
+    val swipeDurationMs: Int = 180,   // Swipe: duração do gesto, 50..2000 ms
+    val isCombo: Boolean = false,    // Combo simultâneo: usa macro de IDs; não executa o próprio ponto
+    val sequence: List<MacroStep> = emptyList(), // Macro sequencial; separado do campo legado macro (Combo)
+    val sequenceRepeatCount: Int = 1 // Número de execuções completas (1..20)
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id); put("key", key)
@@ -92,6 +102,12 @@ data class HudButton(
         put("aimPosX", aimPosX.toDouble()); put("aimPosY", aimPosY.toDouble())
         put("aimZoom", aimZoom.toDouble()); put("linkAimId", linkAimId)
         put("visualScale", visualScale.toDouble())
+        put("rapidIntervalMs", rapidIntervalMs)
+        put("swipeEndX", swipeEndX.toDouble()); put("swipeEndY", swipeEndY.toDouble())
+        put("swipeDurationMs", swipeDurationMs)
+        put("isCombo", isCombo)
+        put("sequence", JSONArray().apply { sequence.take(MacroStepPolicy.MAX_STEPS).forEach { put(it.toJson()) } })
+        put("sequenceRepeatCount", MacroStepPolicy.repeatCount(sequenceRepeatCount))
         // Marca a semântica atual para migrar preferências antigas uma única vez.
         put("aimTuningScale", 2)
     }
@@ -100,12 +116,14 @@ data class HudButton(
         fun typeName(kind: Int): String = when (kind) {
             Kind.FIRE -> "FIRE"
             Kind.AIM -> "AIM"
+            Kind.SWIPE -> "SWIPE"
+            Kind.MACRO -> "MACRO"
             else -> "STANDARD"
         }
 
         /**
          * Lê um botão salvo. Aceita o formato novo ("type"/"mode") e os formatos antigos
-         * ("kind" 0..4 = TAP, TOGGLE, MACRO, CLICK, AIM), convertendo para os 3 tipos.
+         * ("kind" 0..4 = TAP, TOGGLE, MACRO, CLICK, AIM), convertendo para os tipos atuais.
          * Campos ausentes viram valores padrão; nunca lança por falta de campo opcional.
          */
         fun fromJson(b: JSONObject): HudButton {
@@ -124,15 +142,19 @@ data class HudButton(
                     runCatching { m.getInt(i) }.getOrNull()?.takeIf { it >= 0 }
                 }.distinct()
             } ?: emptyList()
+            // Compatibilidade: controles antigos com macro não vazia continuam sendo combos.
+            val isCombo = b.optBoolean("isCombo", name.equals("Combo", ignoreCase = true) || macro.isNotEmpty())
             val kind: Int
             val mode: Int
             if (b.has("type")) {
                 kind = when (b.optString("type")) {
                     "FIRE" -> Kind.FIRE
                     "AIM" -> Kind.AIM
+                    "SWIPE" -> Kind.SWIPE
+                    "MACRO" -> Kind.MACRO
                     else -> Kind.STANDARD
                 }
-                mode = b.optInt("mode", Mode.HOLD).coerceIn(0, 3)
+                mode = b.optInt("mode", Mode.HOLD).coerceIn(0, Mode.RAPID)
             } else {
                 val old = b.optInt("kind", 0) // legado: 0 TAP, 1 TOGGLE, 2 MACRO, 3 CLICK, 4 AIM
                 val isAim = old == 4 || name.equals("Mira", ignoreCase = true)
@@ -149,6 +171,12 @@ data class HudButton(
                     else -> Mode.HOLD
                 }
             }
+            val sequence = b.optJSONArray("sequence")?.let { array ->
+                (0 until minOf(array.length(), MacroStepPolicy.MAX_STEPS)).mapNotNull { index ->
+                    runCatching { array.getJSONObject(index) }.getOrNull()?.let(MacroStep::fromJson)
+                }
+            } ?: emptyList()
+            val sequenceRepeatCount = MacroStepPolicy.repeatCount(b.optInt("sequenceRepeatCount", 1))
             val tuningV2 = b.optInt("aimTuningScale", 0) >= 2
             val oldMouseSens = b.optDouble("aimMouseSens", 1.0).toFloat()
             val oldGeneral = b.optDouble("aimGeneral", 1.0).toFloat()
@@ -196,8 +224,20 @@ data class HudButton(
                     .takeIf { it.isFinite() }?.coerceIn(0f, 1000f) ?: 199f,
                 aimZoom = finiteFloat("aimZoom", 1f, 0.1f, 10f),
                 linkAimId = b.optInt("linkAimId", -1),
-                visualScale = finiteFloat("visualScale", 1f, 0.5f, 2f)
-            )
+                visualScale = finiteFloat("visualScale", 1f, 0.5f, 2f),
+                rapidIntervalMs = b.optInt("rapidIntervalMs", 120).coerceIn(40, 2_000),
+                swipeEndX = finiteFloat("swipeEndX", 0.72f, 0f, 1f),
+                swipeEndY = finiteFloat("swipeEndY", 0.50f, 0f, 1f),
+                swipeDurationMs = b.optInt("swipeDurationMs", 180).coerceIn(50, 2_000),
+                isCombo = kind != Kind.MACRO && isCombo,
+                sequence = sequence,
+                sequenceRepeatCount = sequenceRepeatCount
+            ).let { parsed ->
+                // Fire mantém somente os modos explicitamente suportados pelo painel especializado.
+                if (parsed.kind == Kind.FIRE && parsed.mode != Mode.TAP && parsed.mode != Mode.HOLD) {
+                    parsed.copy(mode = Mode.HOLD)
+                } else parsed
+            }
         }
     }
 }
@@ -206,8 +246,14 @@ data class HudButton(
 fun HudButton.displayName(): String = name.ifEmpty {
     when (kind) {
         Kind.FIRE -> "Tiro"
-        Kind.AIM -> "Mira"
-        else -> "Botão ${keyLabel(key)}"
+        Kind.AIM -> "Aim / Sight"
+        Kind.SWIPE -> "Swipe"
+        Kind.MACRO -> "Macro"
+        else -> when (mode) {
+            Mode.TAP -> "Tap"
+            Mode.RAPID -> "Rapid Tap"
+            else -> "Botão ${keyLabel(key)}"
+        }
     }
 }
 
